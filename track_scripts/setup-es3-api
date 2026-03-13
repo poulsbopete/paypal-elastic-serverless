@@ -1264,20 +1264,50 @@ if [[ -n "$DEMO_OTLP_URL" && -n "$DEMO_API_KEY" ]]; then
   # by the managed ingest endpoint (some Serverless deployments enforce this).
   _ES_USER=$(jq -r --arg r "$REGIONS" '.[$r].credentials.username // "admin"' /tmp/project_results.json 2>/dev/null || echo "admin")
   _ES_PASS="${ELASTICSEARCH_PASSWORD:-}"
+
+  # Try to create an APM-specific API key via Kibana.
+  # Regular ES API keys don't have APM write privileges on Serverless.
+  APM_API_KEY=""
+  if [[ -n "$KIBANA_URL" && -n "$DEMO_API_KEY" ]]; then
+    APM_RESP=$(curl -sf -X POST "${KIBANA_URL}/api/apm/agent_keys" \
+      -H "Authorization: ApiKey ${DEMO_API_KEY}" \
+      -H "Content-Type: application/json" \
+      -H "kbn-xsrf: true" \
+      -d '{"name":"paypal-otel-gen","privileges":["event:write","config_agent:read"]}' 2>/dev/null || true)
+    APM_API_KEY=$(echo "$APM_RESP" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    # Response may be: {apiKey: {encoded: '...'}} or {key: '...'} depending on version
+    encoded = (d.get('apiKey') or {}).get('encoded') or d.get('encoded') or ''
+    print(encoded)
+except:
+    pass
+" 2>/dev/null || true)
+    if [[ -n "$APM_API_KEY" ]]; then
+      echo "APM API key created via Kibana ✓"
+    else
+      echo "WARN: Could not create APM API key via Kibana — will try ES API key and Basic auth"
+    fi
+  fi
+
   python3 -c "
 import json, base64
-api_key = '${DEMO_API_KEY}'
 es_user  = '${_ES_USER}'
 es_pass  = '${_ES_PASS}'
 basic    = base64.b64encode(f'{es_user}:{es_pass}'.encode()).decode() if es_pass else ''
 cfg = {
     'otlp_url':   '${DEMO_OTLP_URL}',
-    'api_key':    api_key,
+    'apm_key':    '${APM_API_KEY}',
+    'api_key':    '${DEMO_API_KEY}',
     'basic_auth': basic,
+    'es_url':     '${ES_URL:-}',
 }
 with open('/tmp/paypal-otlp.json', 'w') as f:
     json.dump(cfg, f)
-print('Config written ✓  basic_auth available:', bool(basic))
+print('Config written ✓')
+print('  apm_key:', bool('${APM_API_KEY}'))
+print('  basic_auth:', bool(basic))
 "
 
   cat > /opt/paypal-otel-gen.py <<'OTELGEN_EOF'
@@ -1432,32 +1462,98 @@ def send(url, auth_header, signal, payload):
     log.warning('OTLP %s HTTP %s: %s', signal, status, body[:300])
     return False
 
-def probe_auth(url, api_key, basic_auth):
-    """Try ApiKey then Basic; return the working header or None."""
-    test_payload = make_logs(SERVICES[:1], 1)
-    data = json.dumps(test_payload).encode()
+def probe_otlp_auth(url, apm_key, api_key, basic_auth):
+    """Try all auth headers against the OTLP endpoint; return working header or None."""
+    test_data = json.dumps(make_logs(SERVICES[:1], 1)).encode()
     candidates = []
+    if apm_key:
+        candidates.append(('APM-ApiKey', f'ApiKey {apm_key}'))
     if api_key:
-        candidates.append(('ApiKey', f'ApiKey {api_key}'))
+        candidates.append(('ES-ApiKey',  f'ApiKey {api_key}'))
     if basic_auth:
-        candidates.append(('Basic', f'Basic {basic_auth}'))
+        candidates.append(('Basic',       f'Basic {basic_auth}'))
     for label, header in candidates:
-        status, body = _http_post(f'{url}/v1/logs', header, data)
-        log.info('Auth probe [%s]: HTTP %s', label, status)
+        status, body = _http_post(f'{url}/v1/logs', header, test_data)
+        log.info('OTLP auth probe [%s]: HTTP %s', label, status)
         if status == 200:
-            log.info('AUTH OK with %s — data is flowing to Elastic Serverless ✓', label)
-            return header
-        log.warning('Auth [%s] rejected: %s', label, body[:200])
-    log.error('All auth methods failed. Endpoint: %s', url)
+            log.info('OTLP AUTH OK with %s ✓', label)
+            return ('otlp', header)
+        log.warning('  rejected: %s', body[:200])
     return None
+
+def es_bulk_write(es_url, auth_header, docs):
+    """Write docs directly to ES data stream via _bulk — fallback when OTLP auth fails."""
+    lines = []
+    for doc in docs:
+        lines.append('{"create":{}}')
+        lines.append(json.dumps(doc))
+    body = ('\n'.join(lines) + '\n').encode()
+    status, resp = _http_post(f'{es_url}/logs-apm.otel-default/_bulk', auth_header, body)
+    if status in (200, 201):
+        return True
+    # Try creating the data stream first if it doesn't exist
+    if status == 404:
+        _http_post(f'{es_url}/_data_stream/logs-apm.otel-default', auth_header, b'')
+        status, resp = _http_post(f'{es_url}/logs-apm.otel-default/_bulk', auth_header, body)
+        if status in (200, 201):
+            return True
+    log.warning('ES bulk HTTP %s: %s', status, resp[:200])
+    return False
+
+def probe_es_direct(es_url, api_key):
+    """Try writing directly to ES data stream; return auth header or None."""
+    if not es_url or not api_key:
+        return None
+    # Ensure the data stream exists
+    auth = f'ApiKey {api_key}'
+    from datetime import datetime, timezone
+    doc = {
+        '@timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+        'service.name': 'checkout-service',
+        'severity_text': 'INFO',
+        'body.text': 'ES-direct probe',
+    }
+    body = ('{"create":{}}\n' + json.dumps(doc) + '\n').encode()
+    # Try creating data stream if needed
+    _http_post(f'{es_url}/_data_stream/logs-apm.otel-default', auth, b'')
+    status, resp = _http_post(f'{es_url}/logs-apm.otel-default/_bulk', auth, body)
+    log.info('ES direct write probe: HTTP %s', status)
+    if status in (200, 201):
+        log.info('ES DIRECT WRITE OK ✓ — indexing to logs-apm.otel-default via ES API')
+        return auth
+    log.warning('ES direct write failed: %s', resp[:200])
+    return None
+
+def make_es_log_docs(svcs, n_per_svc=3):
+    """Generate ECS-compatible log docs for ES _bulk API."""
+    from datetime import datetime, timezone
+    docs = []
+    for svc in svcs:
+        msgs = LOG_MESSAGES.get(svc['name'], ['Processing request'])
+        for _ in range(n_per_svc):
+            is_error = random.random() < 0.12
+            msg = random.choice(msgs[3:] if is_error and len(msgs) > 3 else msgs[:3])
+            docs.append({
+                '@timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'service.name': svc['name'],
+                'cloud.provider': svc['cloud'],
+                'cloud.region': svc['region'],
+                'deployment.environment': 'production',
+                'severity_text': 'ERROR' if is_error else random.choice(['INFO','INFO','WARN']),
+                'body.text': msg,
+                'trace.id': _rand_id(16),
+                'span.id': _rand_id(8),
+                'merchant.id': f'M-{random.randint(10000,99999)}',
+            })
+    return docs
 
 def load_cfg():
     for _ in range(30):
         try:
             with open(CFG_PATH) as f:
                 cfg = json.load(f)
-            if cfg.get('otlp_url') and (cfg.get('api_key') or cfg.get('basic_auth')):
-                log.info('Config loaded: endpoint=%s', cfg['otlp_url'])
+            if cfg.get('otlp_url') or cfg.get('es_url'):
+                log.info('Config loaded')
                 return cfg
         except Exception:
             pass
@@ -1470,31 +1566,53 @@ def main():
     if not cfg:
         sys.exit(1)
 
-    url        = cfg['otlp_url']
+    otlp_url   = cfg.get('otlp_url', '')
+    es_url     = cfg.get('es_url', '')
+    apm_key    = cfg.get('apm_key', '')
     api_key    = cfg.get('api_key', '')
     basic_auth = cfg.get('basic_auth', '')
 
-    log.info('Starting PayPal OTLP generator → %s', url)
+    log.info('Starting PayPal telemetry generator')
+    log.info('  OTLP endpoint: %s', otlp_url)
+    log.info('  ES endpoint:   %s', es_url)
 
-    auth_header = probe_auth(url, api_key, basic_auth)
-    if not auth_header:
-        log.error('Cannot send telemetry — no working auth.')
+    # Strategy 1: OTLP to APM endpoint
+    mode = None
+    auth_header = None
+    if otlp_url:
+        result = probe_otlp_auth(otlp_url, apm_key, api_key, basic_auth)
+        if result:
+            mode, auth_header = result
+
+    # Strategy 2: Write directly to ES data stream via _bulk
+    if not mode and es_url and api_key:
+        auth_header = probe_es_direct(es_url, api_key)
+        if auth_header:
+            mode = 'es-direct'
+
+    if not mode:
+        log.error('No working write method found — giving up.')
         sys.exit(1)
 
+    log.info('Using mode: %s', mode)
     tick = 0
     while True:
         try:
-            ok = send(url, auth_header, 'logs', make_logs(SERVICES, random.randint(2, 5)))
-            if ok:
-                log.info('Sent logs for %d services (tick %d)', len(SERVICES), tick)
-            if tick % 2 == 0:
-                ok = send(url, auth_header, 'traces', make_traces(SERVICES))
+            if mode == 'otlp':
+                ok = send(otlp_url, auth_header, 'logs', make_logs(SERVICES, random.randint(2,5)))
                 if ok:
-                    log.info('Sent traces ✓')
-            if tick % 6 == 0:
-                ok = send(url, auth_header, 'metrics', make_metrics(SERVICES))
+                    log.info('[otlp] Sent logs for %d services (tick %d)', len(SERVICES), tick)
+                if tick % 2 == 0:
+                    ok = send(otlp_url, auth_header, 'traces', make_traces(SERVICES))
+                    if ok: log.info('[otlp] Sent traces ✓')
+                if tick % 6 == 0:
+                    ok = send(otlp_url, auth_header, 'metrics', make_metrics(SERVICES))
+                    if ok: log.info('[otlp] Sent metrics ✓')
+            else:  # es-direct
+                docs = make_es_log_docs(SERVICES, random.randint(2,5))
+                ok = es_bulk_write(es_url, auth_header, docs)
                 if ok:
-                    log.info('Sent metrics ✓')
+                    log.info('[es-direct] Indexed %d log docs (tick %d)', len(docs), tick)
         except Exception as e:
             log.error('Generator loop error: %s', e)
         tick += 1
