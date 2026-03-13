@@ -1322,7 +1322,7 @@ OTLP_CFG_EOF
 Sends realistic PayPal-shaped logs, traces, and metrics to Elastic Serverless.
 Reads credentials from /tmp/paypal-otlp.json written by setup-es3-api."""
 
-import json, time, random, logging, sys, os, hashlib, ssl
+import json, time, random, logging, sys, os, hashlib, ssl, base64
 import urllib.request, urllib.error
 
 logging.basicConfig(
@@ -1356,6 +1356,11 @@ LOG_MESSAGES = {
 def _rand_id(n=16):
     return hashlib.sha256(str(random.random()).encode()).hexdigest()[:n*2]
 
+def _otlp_id(n_bytes):
+    """Return n_bytes of random data base64-encoded — required by OTLP JSON spec.
+    traceId = _otlp_id(16), spanId = _otlp_id(8)"""
+    return base64.b64encode(os.urandom(n_bytes)).decode()
+
 def _ts_ns():
     return int(time.time() * 1e9)
 
@@ -1380,8 +1385,8 @@ def make_logs(svcs, n_per_svc=3):
                 'severityText': 'ERROR' if is_error else random.choice(['INFO', 'INFO', 'WARN']),
                 'severityNumber': 17 if is_error else 9,
                 'body': {'stringValue': msg},
-                'traceId': _rand_id(16),
-                'spanId': _rand_id(8),
+                'traceId': _otlp_id(16),
+                'spanId': _otlp_id(8),
                 'attributes': [
                     {'key': 'merchant.id', 'value': {'stringValue': f'M-{random.randint(10000,99999)}'}},
                     {'key': 'transaction.type', 'value': {'stringValue': random.choice(['payment','refund','dispute'])}},
@@ -1396,14 +1401,14 @@ def make_logs(svcs, n_per_svc=3):
 def make_traces(svcs, n=2):
     resource_spans = []
     for svc in random.sample(svcs, min(n, len(svcs))):
-        trace_id = _rand_id(16)
+        trace_id = _otlp_id(16)
         spans = []
         for i in range(random.randint(1, 4)):
             dur = random.randint(5, 500) * 1_000_000
             start = _ts_ns() - dur
             spans.append({
                 'traceId': trace_id,
-                'spanId': _rand_id(8),
+                'spanId': _otlp_id(8),
                 'name': random.choice(['POST /api/payment', 'GET /merchant', 'process_transaction', 'fraud_check']),
                 'kind': 2,
                 'startTimeUnixNano': str(start),
