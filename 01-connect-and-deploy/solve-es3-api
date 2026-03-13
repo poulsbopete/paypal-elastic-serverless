@@ -1,56 +1,51 @@
 #!/usr/bin/env bash
-# Challenge 1 solve: programmatically launch the fanatics scenario.
+# Challenge 1 solve: ensure generator is running and data is in Elasticsearch.
 set -euo pipefail
 
 log()  { printf "[ch1-solve] %s\n" "$*"; }
 fail() { printf "[ch1-solve ERROR] %s\n" "$*"; exit 1; }
 
-APP="http://localhost:8090"
-
-KIBANA_URL="${ELASTIC_KIBANA_URL:-}"
-API_KEY="${ELASTIC_API_KEY:-}"
-
-[[ -n "$KIBANA_URL" ]] || fail "ELASTIC_KIBANA_URL not set."
-[[ -n "$API_KEY"    ]] || fail "ELASTIC_API_KEY not set."
-
-KIBANA_URL="${KIBANA_URL%/}"
-
-log "Testing connection to Elastic Cloud..."
-CONN_RESULT="$(curl -sf -X POST "${APP}/api/setup/test-connection" \
-  -H 'Content-Type: application/json' \
-  -d "{\"kibana_url\":\"${KIBANA_URL}\",\"api_key\":\"${API_KEY}\"}" 2>/dev/null || echo '{}')"
-
-CONN_OK="$(echo "$CONN_RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(str(d.get('ok',False)).lower())" 2>/dev/null || echo "false")"
-
-if [[ "$CONN_OK" != "true" ]]; then
-  CONN_ERR="$(echo "$CONN_RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('error','unknown'))" 2>/dev/null || echo "unknown")"
-  fail "Connection test failed: $CONN_ERR"
+# ── Ensure generator is running ───────────────────────────────────────────────
+if ! systemctl is-active --quiet paypal-otel-gen 2>/dev/null; then
+  log "Generator not running — starting it..."
+  systemctl start paypal-otel-gen || true
+  sleep 5
 fi
-log "Connection OK ✓"
 
-log "Launching fanatics scenario..."
-curl -sf -X POST "${APP}/api/setup/launch" \
-  -H 'Content-Type: application/json' \
-  -d "{\"scenario_id\":\"fanatics\",\"kibana_url\":\"${KIBANA_URL}\",\"api_key\":\"${API_KEY}\"}" 2>/dev/null || true
+if systemctl is-active --quiet paypal-otel-gen; then
+  log "PayPal telemetry generator is running ✓"
+else
+  fail "Could not start paypal-otel-gen. Check: journalctl -u paypal-otel-gen --no-pager -n 20"
+fi
 
-log "Waiting for deployment to register..."
-for i in $(seq 1 90); do
-  DEPS="$(curl -sf "${APP}/api/deployments" 2>/dev/null || echo "[]")"
-  RUNNING="$(echo "$DEPS" | python3 -c "
-import sys, json
-deps = json.load(sys.stdin)
-print(sum(1 for d in deps if d.get('running')))
-" 2>/dev/null || echo "0")"
+# ── Wait for data to appear ───────────────────────────────────────────────────
+ES_URL=$(python3 -c "
+import json
+d = json.load(open('/tmp/project_results.json'))
+print(next(iter(d.values()))['endpoints']['elasticsearch'])
+" 2>/dev/null) || fail "Cannot read ES URL from /tmp/project_results.json"
 
-  if [[ "$RUNNING" -ge 1 ]]; then
-    log "Deployment active after ${i}s ✓"
+API_KEY=$(python3 -c "
+import json
+d = json.load(open('/tmp/project_results.json'))
+print(next(iter(d.values()))['credentials']['api_key'])
+" 2>/dev/null) || fail "Cannot read API key from /tmp/project_results.json"
+
+log "Waiting for telemetry to flow into paypal-otel-logs..."
+for i in $(seq 1 30); do
+  DOC_COUNT=$(curl -sf "${ES_URL}/paypal-otel-logs/_count" \
+    -H "Authorization: ApiKey ${API_KEY}" 2>/dev/null \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('count',0))" 2>/dev/null || echo "0")
+
+  if [[ "$DOC_COUNT" -ge 10 ]]; then
+    log "Data flowing: $DOC_COUNT documents in paypal-otel-logs ✓"
     break
   fi
 
-  if [[ $i -eq 90 ]]; then
-    fail "Deployment did not become active after 90s. Check: journalctl -u elastic-demo"
+  if [[ $i -eq 30 ]]; then
+    fail "No data in paypal-otel-logs after 60s. Check: journalctl -u paypal-otel-gen --no-pager -n 20"
   fi
   sleep 2
 done
 
-log "Solve complete — fanatics scenario deployed and running."
+log "Challenge 1 solved — PayPal telemetry is flowing into Elastic Serverless."

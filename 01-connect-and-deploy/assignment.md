@@ -174,7 +174,7 @@ Click the **Demo App** tab. This is your control panel for the lab:
 
 Click the **Elastic Serverless** tab to open Kibana. No login required — authentication is handled automatically via the NGINX proxy.
 
-Review the pre-provisioned assets: **Dashboards**, **APM Service Map**, **AI Investigation Agent**, and **Alert Rules**.
+Review the pre-provisioned assets: **PayPal Merchant Observability Dashboard**, **AI Investigation Agent**, **Alert Rules**, and **ML Anomaly Detection Jobs**.
 
 ---
 

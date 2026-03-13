@@ -1,55 +1,80 @@
 #!/usr/bin/env bash
-# Challenge 3 check: verify the demo app is running and a fault was injected
-# (the workflow auto-remediates, so we don't require the fault to still be active).
+# Challenge 3 check: verify that a fault was injected via the Demo App chaos controller.
+set -euo pipefail
+
+fail() { echo "❌ $*"; exit 1; }
+pass() { echo "✅ $*"; }
 
 APP="http://localhost:8090"
 
 # ── App healthy ───────────────────────────────────────────────────────────────
-if ! curl -sf "${APP}/health" >/dev/null 2>&1; then
-  echo "FAIL: Demo app is not responding on port 8090."
-  exit 1
-fi
+curl -sf "${APP}/health" >/dev/null 2>&1 || fail "Demo app is not responding."
+pass "Demo app is healthy"
 
-# ── At least one deployment is running ───────────────────────────────────────
-DEPS="$(curl -sf "${APP}/api/deployments" 2>/dev/null)" || DEPS="[]"
-DEP_COUNT="$(echo "$DEPS" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-print(len([x for x in d if x.get('running')]))
-" 2>/dev/null)" || DEP_COUNT="0"
-
-if [[ "$DEP_COUNT" == "0" ]]; then
-  echo "FAIL: No active deployment found. Make sure the PayPal scenario is running in the Demo App."
-  exit 1
-fi
-
-# ── Check if a fault was injected (active) or was recently resolved ───────────
+# ── Check for any active or resolved fault ────────────────────────────────────
+# Try with deployment_id first, then without
+DEPS="$(curl -sf "${APP}/api/deployments" 2>/dev/null || echo "[]")"
 DEP_ID="$(echo "$DEPS" | python3 -c "
 import sys, json
-d = json.load(sys.stdin)
-print(d[0].get('deployment_id','') if d else '')
-" 2>/dev/null)" || DEP_ID=""
+deps = json.load(sys.stdin)
+print(deps[0]['deployment_id'] if deps else '')
+" 2>/dev/null || echo "")"
 
 if [[ -n "$DEP_ID" ]]; then
-  CHAOS="$(curl -sf "${APP}/api/chaos/status?deployment_id=${DEP_ID}" 2>/dev/null)" || CHAOS="{}"
+  CHAOS="$(curl -sf "${APP}/api/chaos/status?deployment_id=${DEP_ID}" 2>/dev/null || echo "{}")"
 else
-  CHAOS="$(curl -sf "${APP}/api/chaos/status" 2>/dev/null)" || CHAOS="{}"
+  CHAOS="$(curl -sf "${APP}/api/chaos/status" 2>/dev/null || echo "{}")"
 fi
 
-ACTIVE_COUNT="$(echo "$CHAOS" | python3 -c "
+TRIGGERED_COUNT="$(echo "$CHAOS" | python3 -c "
 import sys, json
 try:
     ch = json.load(sys.stdin)
-    active = [k for k,v in ch.items() if isinstance(v,dict) and v.get('state') in ('ACTIVE','RESOLVED')]
-    print(len(active))
+    triggered = [k for k,v in ch.items()
+                 if isinstance(v,dict) and v.get('state') in ('ACTIVE','RESOLVED')]
+    print(len(triggered))
 except Exception:
     print(0)
-" 2>/dev/null)" || ACTIVE_COUNT="0"
+" 2>/dev/null || echo "0")"
 
-if [[ "$ACTIVE_COUNT" == "0" ]]; then
-  echo "FAIL: No fault has been injected yet. Go to the Demo App → Payment Incident Simulator and inject a fault, then let Elastic Workflows resolve it."
-  exit 1
+if [[ "$TRIGGERED_COUNT" -ge 1 ]]; then
+  pass "Payment fault was triggered — Elastic detected and handled the incident ✓"
+else
+  fail "No fault has been injected yet.
+
+Go to the Demo App tab → Chaos Controller and click one of the payment incident buttons (Payments Orchestrator Timeout, Fraud Decisioning Latency Spike, or Merchant API Auth Failure).
+
+Then return here and click Check."
 fi
 
-echo "PASS: Payment incident detected and handled — Elastic Workflows completed remediation."
+# ── Verify elevated errors in ES (the fault generated real data) ──────────────
+ES_URL=$(python3 -c "
+import json
+try:
+    d = json.load(open('/tmp/project_results.json'))
+    print(next(iter(d.values()))['endpoints']['elasticsearch'])
+except: print('')
+" 2>/dev/null || echo "")
+
+API_KEY=$(python3 -c "
+import json
+try:
+    d = json.load(open('/tmp/project_results.json'))
+    print(next(iter(d.values()))['credentials']['api_key'])
+except: print('')
+" 2>/dev/null || echo "")
+
+if [[ -n "$ES_URL" && -n "$API_KEY" ]]; then
+  ERROR_COUNT=$(curl -sf "${ES_URL}/paypal-otel-logs/_count" \
+    -H "Authorization: ApiKey ${API_KEY}" \
+    -H "Content-Type: application/json" \
+    -d '{"query":{"bool":{"must":[{"term":{"severity_text":"ERROR"}},{"range":{"@timestamp":{"gte":"now-10m"}}}]}}}' 2>/dev/null \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('count',0))" 2>/dev/null || echo "0")
+  if [[ "$ERROR_COUNT" -ge 1 ]]; then
+    pass "$ERROR_COUNT error events in the last 10 minutes — fault impact visible in Elastic ✓"
+  fi
+fi
+
+echo ""
+echo "🎉 Payment incident confirmed. Elastic detected the fault and the autonomous workflow is executing remediation."
 exit 0

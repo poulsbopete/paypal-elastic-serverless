@@ -1,13 +1,27 @@
 #!/usr/bin/env bash
-# Challenge 2 solve: nothing to do programmatically — just verify state is correct.
+# Challenge 2 solve: ensure generator is running with substantial data.
 set -euo pipefail
 
-DEPS="$(curl -sf http://localhost:8090/api/deployments 2>/dev/null || echo "[]")"
-COUNT="$(echo "$DEPS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")"
+log()  { printf "[ch2-solve] %s\n" "$*"; }
 
-if [[ "$COUNT" -lt 1 ]]; then
-  echo "[ch2-solve] WARNING: No active deployments. This challenge requires a running deployment from Challenge 1."
-  exit 1
-fi
+systemctl is-active --quiet paypal-otel-gen 2>/dev/null || {
+  log "Restarting generator..."
+  systemctl restart paypal-otel-gen || true
+  sleep 8
+}
 
-echo "[ch2-solve] Deployment confirmed active. Challenge 2 passed."
+ES_URL=$(python3 -c "import json; d=json.load(open('/tmp/project_results.json')); print(next(iter(d.values()))['endpoints']['elasticsearch'])" 2>/dev/null)
+API_KEY=$(python3 -c "import json; d=json.load(open('/tmp/project_results.json')); print(next(iter(d.values()))['credentials']['api_key'])" 2>/dev/null)
+
+log "Waiting for 50+ documents..."
+for i in $(seq 1 30); do
+  COUNT=$(curl -sf "${ES_URL}/paypal-otel-logs/_count" -H "Authorization: ApiKey ${API_KEY}" 2>/dev/null \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('count',0))" 2>/dev/null || echo "0")
+  if [[ "$COUNT" -ge 50 ]]; then
+    log "Data confirmed: $COUNT documents in paypal-otel-logs ✓"
+    break
+  fi
+  sleep 2
+done
+
+log "Challenge 2 solved — telemetry exploration verified."

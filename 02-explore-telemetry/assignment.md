@@ -127,17 +127,39 @@ Copy any `trace.id` from the results — you'll use it in Step 3.
 
 ---
 
-## Step 3 — Trace a Transaction End-to-End
+## Step 3 — Trace a Transaction by Merchant
 
-Take any `trace.id` from the results above and view the full distributed trace:
+Take any `trace.id` from the results above and find all log entries across all services for that trace — this is distributed tracing without a separate trace tool:
 
-In Kibana, go to **APM** → **Traces** and paste the `trace.id` into the search box. You'll see every service hop that participated in that transaction — something impossible with CAL alone.
+```esql
+FROM paypal-otel-logs
+| WHERE trace.id == "<paste-trace-id-here>"
+| KEEP @timestamp, service.name, severity_text, body.text, transaction.name
+| SORT @timestamp ASC
+```
+
+Replace `<paste-trace-id-here>` with an actual `trace.id` from Step 2. You'll see every service hop that touched that transaction — the equivalent of a distributed trace reconstructed purely from logs.
 
 ---
 
-## Step 4 — Check the Service Map
+## Step 4 — Query Latency Across Services
 
-In Kibana, go to **APM** → **Service Map**. You should see all 7 PayPal microservices with live dependency lines. Hover any service to see its P99 latency and error rate.
+ES|QL can compute P99 latency directly from the telemetry:
+
+```esql
+FROM paypal-otel-logs
+| WHERE @timestamp > NOW() - 30 MINUTES
+| EVAL duration_ms = transaction.duration.us / 1000
+| STATS p99_ms = MAX(duration_ms), avg_ms = AVG(duration_ms), requests = COUNT(*) BY service.name
+| SORT p99_ms DESC
+```
+
+```esql
+FROM paypal-otel-logs
+| WHERE @timestamp > NOW() - 30 MINUTES AND http.response.status_code >= 500
+| STATS error_5xx = COUNT(*) BY service.name, http.response.status_code
+| SORT error_5xx DESC
+```
 
 ---
 
