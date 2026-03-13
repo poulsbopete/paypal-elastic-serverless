@@ -797,6 +797,7 @@ WorkingDirectory=${DEMO_DIR}
 Environment=PATH=${DEMO_DIR}/packages/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=PYTHONPATH=${DEMO_DIR}/packages
 Environment=OPERATOR_EMAIL=${PARTICIPANT_EMAIL}
+Environment=ACTIVE_SCENARIO=fanatics
 ExecStart=/usr/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port ${DEMO_PORT}
 Restart=on-failure
 RestartSec=5
@@ -814,21 +815,14 @@ systemctl start  elastic-demo
 
 echo "Waiting for demo app to become healthy on port $DEMO_PORT..."
 DEMO_HEALTHY=false
-for i in $(seq 1 180); do
+for i in $(seq 1 60); do
   if curl -sf "http://localhost:${DEMO_PORT}/health" >/dev/null 2>&1; then
     echo "Demo app healthy after ${i}s ✓"
     DEMO_HEALTHY=true
     break
   fi
-  if [[ $i -eq 30 ]]; then
-    echo "Still waiting for demo app... (${i}s)"
-    systemctl is-active --quiet elastic-demo || {
-      echo "WARN: elastic-demo service is not active at ${i}s — last 20 log lines:"
-      journalctl -u elastic-demo --no-pager -n 20 || true
-    }
-  fi
-  if [[ $i -eq 180 ]]; then
-    echo "WARN: Demo app did not become healthy after 180s — last 30 log lines:"
+  if [[ $i -eq 60 ]]; then
+    echo "WARN: Demo app did not become healthy after 60s — last 30 log lines:"
     journalctl -u elastic-demo --no-pager -n 30 || true
   fi
   sleep 1
