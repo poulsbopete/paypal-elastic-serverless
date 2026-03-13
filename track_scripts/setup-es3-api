@@ -1258,15 +1258,17 @@ fi
 # As a guaranteed fallback, we run a separate systemd service that sends
 # realistic PayPal-shaped logs, metrics, and traces directly via httpx.
 # This service runs alongside the demo app and ensures data always flows.
-if [[ -n "$DEMO_OTLP_URL" && -n "$DEMO_API_KEY" ]]; then
+# Install the generator whenever we have ES credentials — DEMO_OTLP_URL is
+# optional (used only for the OTLP probe; generator falls back to ES _bulk).
+if [[ -n "$ELASTICSEARCH_API_KEY" && -n "$ES_URL" ]]; then
   echo "Writing PayPal OTLP generator config..."
-  # Include Basic auth credentials as fallback in case ApiKey auth is rejected
-  # by the managed ingest endpoint (some Serverless deployments enforce this).
   # Read all credentials directly from project_results.json.
   # Do NOT use `agent variable get` — it requires INSTRUQT_AUTH_TOKEN which
   # is not available in the systemd service environment.
-  python3 - <<'OTLP_CFG_EOF'
-import json, base64, sys
+  # Write the OTLP config — prefer project_results.json but fall back to
+  # bash env vars (ES_URL, ELASTICSEARCH_API_KEY) that are always set.
+  python3 - <<OTLP_CFG_EOF
+import json, base64, sys, os
 
 try:
     with open('/tmp/project_results.json') as f:
@@ -1275,12 +1277,17 @@ try:
     creds     = r.get('credentials', {})
     endpoints = r.get('endpoints', {})
 
-    api_key  = creds.get('api_key', '')   # saved by setup after key creation
+    api_key  = creds.get('api_key', '') or os.environ.get('ELASTICSEARCH_API_KEY', '')
     es_user  = creds.get('username', 'admin')
-    es_pass  = creds.get('password', '')
-    es_url   = endpoints.get('elasticsearch', '')
-    apm_url  = endpoints.get('apm', endpoints.get('ingest', ''))
+    es_pass  = creds.get('password', '') or os.environ.get('ELASTICSEARCH_PASSWORD', '')
+    es_url   = endpoints.get('elasticsearch', '') or os.environ.get('ES_URL', '')
+    apm_url  = endpoints.get('apm', endpoints.get('ingest', '')) or os.environ.get('DEMO_OTLP_URL', '')
     basic    = base64.b64encode(f'{es_user}:{es_pass}'.encode()).decode() if es_pass else ''
+
+    if not api_key:
+        print('ERROR: api_key is empty — API key may not have been generated yet', file=sys.stderr)
+    if not es_url:
+        print('ERROR: es_url is empty', file=sys.stderr)
 
     cfg = {
         'es_url':     es_url,
@@ -1298,6 +1305,15 @@ try:
     print(f'  basic:    {"yes" if basic else "no"}')
 except Exception as e:
     print(f'ERROR writing OTLP config: {e}', file=sys.stderr)
+    # Emergency fallback: write whatever we have from env vars
+    try:
+        es_url  = os.environ.get('ES_URL', '')
+        api_key = os.environ.get('ELASTICSEARCH_API_KEY', '')
+        if es_url and api_key:
+            json.dump({'es_url': es_url, 'otlp_url': '', 'api_key': api_key, 'basic_auth': ''}, open('/tmp/paypal-otlp.json','w'))
+            print('Emergency config written from env vars')
+    except Exception as e2:
+        print(f'Emergency fallback also failed: {e2}', file=sys.stderr)
 OTLP_CFG_EOF
 
   cat > /opt/paypal-otel-gen.py <<'OTELGEN_EOF'
