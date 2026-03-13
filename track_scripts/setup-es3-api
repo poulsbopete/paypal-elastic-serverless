@@ -231,10 +231,7 @@ echo "Configure NGINX"
 mkdir -p /usr/share/nginx/html/loading
 mkdir -p /usr/share/nginx/html/chatbot
 
-# Create HTML file with iframe for interactive content during loading
-cat > /usr/share/nginx/html/loading/index.html < /tmp/splash.html
-# splash.html is written by setup from the track's docs/ — fall back to inline if missing
-if [ ! -s /usr/share/nginx/html/loading/index.html ]; then
+# Create PayPal value props loading page
 cat > /usr/share/nginx/html/loading/index.html <<'HTML_EOF'
 <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>PayPal Merchant Observability</title>
 <style>body{margin:0;font-family:system-ui,sans-serif;background:#0a0f1e;color:#e6edf3;padding:40px 32px}
@@ -251,7 +248,6 @@ p{font-size:13px;line-height:1.7;color:#94a3b8}a.btn{display:inline-block;margin
 <a class="btn" href="/app/dashboards#/list?_g=(filters:!(),refreshInterval:(pause:!f,value:30000),time:(from:now-30m,to:now))">Open Kibana Dashboards &rarr;</a>
 </body></html>
 HTML_EOF
-fi
 
 # Create chatbot HTML page with Elastic MCP integration
 cat > /usr/share/nginx/html/chatbot/index.html <<'CHATBOT_EOF'
