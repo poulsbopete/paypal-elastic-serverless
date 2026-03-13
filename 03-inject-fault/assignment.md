@@ -88,20 +88,27 @@ Compare the error rates to your pre-fault baseline. You should see a clear spike
 
 ---
 
-## Step 3 — Identify Impacted Merchants
+## Step 3 — Identify the Blast Radius
 
-Find which merchants are experiencing the highest error rates during the incident:
+Find which services are seeing the highest error rates during the incident, and what the error messages are:
 
 ```esql
 FROM logs.otel
 | WHERE @timestamp > NOW() - 5 MINUTES AND severity_text == "ERROR"
-| WHERE merchant.id IS NOT NULL
-| STATS errors = COUNT(*) BY merchant.id, service.name
+| STATS errors = COUNT(*), unique_traces = COUNT_DISTINCT(trace.id) BY service.name
 | SORT errors DESC
 | LIMIT 15
 ```
 
-This is the merchant-impact analysis that a PayPal SRE would need during a P1 incident.
+Drill into the top affected service to see the actual error messages:
+
+```esql
+FROM logs.otel
+| WHERE @timestamp > NOW() - 5 MINUTES AND severity_text == "ERROR"
+| KEEP @timestamp, service.name, body.text, trace.id
+| SORT @timestamp DESC
+| LIMIT 20
+```
 
 ---
 

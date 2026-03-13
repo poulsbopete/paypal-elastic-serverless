@@ -180,7 +180,7 @@ Review the pre-provisioned assets: **Dashboards**, **APM Service Map**, **AI Inv
 
 ## Step 5 — Verify Live Telemetry
 
-In Kibana, open **Discover** and select the `logs.otel` data view. You should see logs flowing from all 7 services with `merchant.id`, `service.name`, and `trace.id` fields populated.
+In Kibana, open **Discover** and select the `logs.otel` data view. You should see logs flowing from all 7 services with `service.name`, `severity_text`, `body.text`, and `trace.id` fields populated.
 
 Run this ES|QL query to confirm:
 

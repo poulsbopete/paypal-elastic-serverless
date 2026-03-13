@@ -24,7 +24,7 @@ notes:
     Elastic Workflows are event-driven automation pipelines built directly into the Elastic platform.
 
     **For PayPal, a typical workflow might:**
-    1. Trigger on: `error_rate > 5%` for `checkout-service` for any `merchant.tier == "premium"`
+    1. Trigger on: `error_rate > 5%` for `checkout-service` sustained for 2 minutes
     2. Investigate: Run ES|QL to identify affected merchant cohort and root cause service
     3. Correlate: Pull the distributed trace for the highest-impact transaction
     4. Notify: Send a Slack alert with pre-populated incident context
@@ -102,23 +102,36 @@ Click any triggered rule to see the workflow execution log — each step is reco
 
 ## Step 4 — Run the Investigation Yourself
 
-Practice the full ES|QL-based incident investigation workflow:
+Practice the full ES|QL-based incident investigation workflow.
+
+Error surge by service in the last 10 minutes:
 
 ```esql
 FROM logs.otel
 | WHERE @timestamp > NOW() - 10 MINUTES
 | WHERE severity_text IN ("ERROR", "CRITICAL")
-| STATS errors = COUNT(*), affected_merchants = COUNT_DISTINCT(merchant.id)
-  BY service.name
+| STATS errors = COUNT(*), unique_traces = COUNT_DISTINCT(trace.id) BY service.name
 | SORT errors DESC
 ```
 
+Recent error log messages from the top affected service:
+
 ```esql
-FROM traces-*
-| WHERE @timestamp > NOW() - 10 MINUTES AND error == true
-| STATS error_spans = COUNT(*), p99 = PERCENTILE(transaction.duration, 99)
-  BY service.name
-| SORT error_spans DESC
+FROM logs.otel
+| WHERE @timestamp > NOW() - 10 MINUTES AND severity_text == "ERROR"
+| KEEP @timestamp, service.name, body.text, trace.id
+| SORT @timestamp DESC
+| LIMIT 25
+```
+
+Error rate trend over time (spot the fault injection spike):
+
+```esql
+FROM logs.otel
+| WHERE @timestamp > NOW() - 30 MINUTES
+| WHERE severity_text == "ERROR"
+| STATS errors = COUNT(*) BY service.name, BUCKET(@timestamp, 1 minute)
+| SORT @timestamp DESC
 ```
 
 ---
@@ -129,7 +142,7 @@ The PayPal Merchant Observability platform you've just explored delivers:
 
 - **CAL replacement** with OTel semantic conventions — no proprietary schema
 - **Unified signals** — logs, metrics, and traces in one query engine
-- **Merchant-centric investigation** — `merchant.id` as a first-class pivot
-- **High-cardinality metrics** — millions of merchant dimensions, no pre-aggregation
+- **Service-centric investigation** — `service.name`, `trace.id`, `body.text` queryable together
+- **High-cardinality telemetry** — ES|QL handles millions of spans and log events without pre-aggregation
 - **Autonomous response** — AI Agent + Workflows reduce MTTR without human intervention
 - **Zero-ops infrastructure** — Elastic Serverless scales automatically, no cluster management

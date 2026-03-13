@@ -90,27 +90,29 @@ This is the equivalent of a CAL query but with zero specialist syntax — and it
 
 ---
 
-## Step 2 — Investigate a Specific Merchant
+## Step 2 — Drill Into a Specific Service
 
-Simulate a merchant complaint. Run the following query to see all errors for a specific merchant:
+Pick the service with the highest error count from Step 1 and drill into its recent errors:
 
 ```esql
 FROM logs.otel
-| WHERE merchant.id IS NOT NULL AND severity_text == "ERROR"
-| STATS errors = COUNT(*) BY merchant.id, service.name
+| WHERE severity_text == "ERROR"
+| STATS errors = COUNT(*), last_seen = MAX(@timestamp) BY service.name
 | SORT errors DESC
 | LIMIT 10
 ```
 
-Pick any `merchant.id` from the results and drill in:
+Now drill into the top service to see individual log messages:
 
 ```esql
 FROM logs.otel
-| WHERE merchant.id == "<paste merchant id here>"
+| WHERE service.name == "checkout-service" AND severity_text == "ERROR"
 | KEEP @timestamp, service.name, severity_text, body.text, trace.id
 | SORT @timestamp DESC
 | LIMIT 20
 ```
+
+Copy any `trace.id` from the results — you'll use it in Step 3.
 
 ---
 
