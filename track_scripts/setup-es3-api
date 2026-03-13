@@ -2223,26 +2223,42 @@ else
   echo "WARN: Skipping alert rules — KIBANA_URL or BASE64 not set"
 fi
 
-# ── Kibana Data View + Dashboard for paypal-otel-logs ────────────────────────
-# Create a data view and a working dashboard so the Elastic Serverless tab
-# shows real PayPal data instead of the broken Fanatics APM dashboard.
+# ── Kibana Data Views + Executive Dashboard (PayPal) ─────────────────────────
+# Mirrors the original generate_exec_dashboard.py from elastic-launch-demo,
+# ported for PayPal with traces-apm.otel-*, metrics-apm.otel-*, paypal-otel-logs.
+# Sections: Cloud Overview · RED Metrics · USE Metrics · APM · Detail · Event Logs
 if [[ -n "$KIBANA_URL" && -n "$BASE64" ]]; then
-  echo "Creating Kibana data view and dashboard for paypal-otel-logs..."
+  echo "Creating Kibana data views and PayPal Executive Dashboard..."
   sleep 10  # Allow generator to index at least a few docs first
 
   python3 - <<KIBANA_DASH_EOF
-import json, urllib.request, urllib.error, ssl, uuid, sys
+import json, uuid as _uuid, urllib.request, urllib.error, ssl
 
 KIBANA = '${KIBANA_URL}'
 AUTH   = 'Basic ${BASE64}'
 CTX    = ssl.create_default_context()
 
+DV_LOGS    = "paypal-otel-logs"
+DV_TRACES  = "traces-apm.otel-*"
+DV_METRICS = "metrics-apm.otel-*"
+DASHBOARD_ID    = "paypal-merchant-observability-dashboard"
+DASHBOARD_TITLE = "PayPal Merchant Observability Executive Dashboard"
+
+CLOUD_GROUPS = [
+    {"label": "**AWS** · us-east-1",   "x_start": 0,  "col_width": 15,
+     "services": ["merchant-api", "checkout-service", "payments-orchestrator"]},
+    {"label": "**GCP** · us-central1", "x_start": 16, "col_width": 15,
+     "services": ["fraud-decisioning", "settlement-service"]},
+    {"label": "**Azure** · eastus",    "x_start": 32, "col_width": 16,
+     "services": ["merchant-support-api", "notification-service"]},
+]
+
+def uid(): return str(_uuid.uuid4())
+
 def kbn(method, path, body=None):
-    url = f'{KIBANA}{path}'
     data = json.dumps(body).encode() if body else None
-    req  = urllib.request.Request(url, data=data, method=method,
-        headers={'Authorization': AUTH, 'kbn-xsrf': 'true',
-                 'Content-Type': 'application/json'})
+    req  = urllib.request.Request(f'{KIBANA}{path}', data=data, method=method,
+        headers={'Authorization': AUTH, 'kbn-xsrf': 'true', 'Content-Type': 'application/json'})
     try:
         with urllib.request.urlopen(req, context=CTX, timeout=20) as r:
             return r.status, json.loads(r.read())
@@ -2251,174 +2267,483 @@ def kbn(method, path, body=None):
     except Exception as ex:
         return 0, {'error': str(ex)}
 
-# 1. Create data view for paypal-otel-*
-status, resp = kbn('POST', '/api/data_views/data_view', {
-    'data_view': {
-        'title': 'paypal-otel-*',
-        'timeFieldName': '@timestamp',
-        'name': 'PayPal OTel Telemetry',
-    }
-})
-if status in (200, 409):  # 409 = already exists
-    dv_id = resp.get('data_view', {}).get('id', 'paypal-otel-')
-    print(f'Data view: HTTP {status} id={dv_id}')
-else:
-    print(f'WARN: data view HTTP {status}')
-    dv_id = 'paypal-otel-'
+for dv_title, dv_name in [
+    (DV_LOGS,    "PayPal OTel Logs"),
+    (DV_TRACES,  "PayPal OTel Traces"),
+    (DV_METRICS, "PayPal OTel Metrics"),
+]:
+    st, _ = kbn('POST', '/api/data_views/data_view', {
+        'data_view': {'title': dv_title, 'timeFieldName': '@timestamp', 'name': dv_name}
+    })
+    print(f'Data view [{dv_name}]: HTTP {st}')
 
-# 2. Build dashboard NDJSON and import it
-layer1 = str(uuid.uuid4())
-layer2 = str(uuid.uuid4())
-layer3 = str(uuid.uuid4())
-viz1   = str(uuid.uuid4())
-viz2   = str(uuid.uuid4())
-viz3   = str(uuid.uuid4())
-viz4   = str(uuid.uuid4())
-dash   = str(uuid.uuid4())
+def make_palette(thresholds):
+    stops       = [{"color": c, "stop": s} for c, s in thresholds]
+    color_stops = [{"color": thresholds[0][0], "stop": 0}]
+    for i in range(1, len(thresholds)):
+        color_stops.append({"color": thresholds[i][0], "stop": thresholds[i-1][1]})
+    return {"name": "custom", "type": "palette", "params": {
+        "steps": len(thresholds), "name": "custom", "reverse": False,
+        "rangeType": "number", "rangeMin": 0, "rangeMax": None,
+        "progression": "fixed", "stops": stops, "colorStops": color_stops,
+        "continuity": "above", "maxSteps": 5}}
 
-def lens_esql(title, esql_query, viz_type, layer_id, columns):
-    """Build a minimal Lens saved object using ES|QL (textBased datasource)."""
-    return {
-        'type': 'lens', 'id': str(uuid.uuid4()),
-        'attributes': {
-            'title': title,
-            'visualizationType': viz_type,
-            'state': {
-                'datasourceStates': {
-                    'textBased': {
-                        'layers': {
-                            layer_id: {
-                                'index': '', 'query': {'esql': esql_query},
-                                'columns': columns, 'allColumns': columns,
-                                'timeField': '@timestamp',
-                            }
-                        }
-                    }
-                },
-                'visualization': _viz_config(viz_type, layer_id, columns),
-                'query': {'query': '', 'language': 'kuery'},
-                'filters': [], 'internalReferences': [], 'adHocDataViews': {},
-            }
-        },
-        'references': [],
-    }
+PAL_ERRORS   = make_palette([("#54B399", 2), ("#D6BF57", 5), ("#E7664C", 9999)])
+PAL_ERR_RATE = make_palette([("#54B399", 0.12), ("#D6BF57", 0.20), ("#E7664C", 1.0)])
+PAL_TPUT     = make_palette([("#54B399", 2000), ("#D6BF57", 3500), ("#E7664C", 99999)])
+PAL_P99      = make_palette([("#54B399", 500000), ("#D6BF57", 2000000), ("#E7664C", 999000000)])
+PAL_P50      = make_palette([("#54B399", 200000), ("#D6BF57", 800000),  ("#E7664C", 999000000)])
 
-def _viz_config(viz_type, layer_id, columns):
-    if viz_type == 'lnsDatatable':
-        return {
-            'layerId': layer_id, 'layerType': 'data',
-            'columns': [{'columnId': c['columnId'], 'isTransposed': False} for c in columns],
-        }
-    if viz_type == 'lnsXY':
-        cat = columns[0]['columnId']
-        val = columns[1]['columnId']
-        return {
-            'legend': {'isVisible': True, 'position': 'right'},
-            'valueLabels': 'inside',
-            'layers': [{
-                'layerId': layer_id, 'layerType': 'data',
-                'seriesType': 'bar_horizontal',
-                'xAccessor': val, 'splitAccessor': None,
-                'accessors': [val], 'yConfig': [],
-            }],
-            'yTitle': '', 'xTitle': '',
-        }
-    if viz_type == 'lnsMetric':
-        return {
-            'layerId': layer_id, 'layerType': 'data',
-            'metricAccessor': columns[0]['columnId'],
-        }
-    return {}
+def make_ref(dv_id, layer_id):
+    return {"id": dv_id, "name": f"indexpattern-datasource-layer-{layer_id}", "type": "index-pattern"}
 
-def col(cid, field, ftype):
-    return {'columnId': cid, 'fieldName': field, 'meta': {'type': ftype}}
+def make_layer(lid, col_order, columns, index_pattern_id=None):
+    layer = {"columnOrder": col_order, "columns": columns,
+             "ignoreGlobalFilters": False, "incompleteColumns": {}, "sampling": 1}
+    if index_pattern_id:
+        layer["indexPatternId"] = index_pattern_id
+    return {lid: layer}
 
-# Lens visualizations
-v1 = lens_esql(
-    'Errors by Service (Last Hour)',
-    "FROM paypal-otel-logs | WHERE @timestamp > NOW() - 1 hours AND severity_text == \"ERROR\" | STATS errors = COUNT(*) BY service.name | SORT errors DESC | LIMIT 10",
-    'lnsXY', str(uuid.uuid4()),
-    [col('c1','service.name','string'), col('c2','errors','number')],
+def make_state(layers, visualization, query="", filters=None):
+    return {"adHocDataViews": {},
+            "datasourceStates": {"formBased": {"layers": layers},
+                                 "indexpattern": {"layers": {}}, "textBased": {"layers": {}}},
+            "filters": filters or [], "internalReferences": [],
+            "query": {"language": "kuery", "query": query}, "visualization": visualization}
+
+def make_panel(pid, grid, title, vis_type, state, references):
+    return {"embeddableConfig": {
+                "attributes": {"references": references, "state": state, "title": title,
+                               "type": "lens", "visualizationType": vis_type, "version": 2},
+                "enhancements": {"dynamicActions": {"events": []}},
+                "hidePanelTitles": False, "syncColors": False, "syncCursor": True, "syncTooltips": False},
+            "gridData": grid, "panelIndex": pid, "type": "lens"}
+
+def col_count(label="Count", kql_filter=None):
+    c = {"customLabel": True, "dataType": "number", "isBucketed": False, "label": label,
+         "operationType": "count", "params": {"emptyAsNull": True},
+         "scale": "ratio", "sourceField": "___records___"}
+    if kql_filter:
+        c["filter"] = {"language": "kuery", "query": kql_filter}
+    return c
+
+def col_date_hist(interval="30s"):
+    return {"customLabel": True, "dataType": "date", "isBucketed": True, "label": "@timestamp",
+            "operationType": "date_histogram", "params": {"interval": interval},
+            "scale": "interval", "sourceField": "@timestamp"}
+
+def col_terms(field, label, size=10, order_col=None):
+    return {"customLabel": True, "dataType": "string", "isBucketed": True, "label": label,
+            "operationType": "terms", "scale": "ordinal", "sourceField": field,
+            "params": {"size": size, "orderDirection": "desc",
+                       "orderBy": {"columnId": order_col, "type": "column"} if order_col else {"type": "alphabetical"},
+                       "missingBucket": False, "otherBucket": False}}
+
+def col_pct(field, pct, label):
+    return {"customLabel": True, "dataType": "number", "isBucketed": False, "label": label,
+            "operationType": "percentile", "params": {"percentile": pct},
+            "scale": "ratio", "sourceField": field}
+
+def col_avg(field, label):
+    return {"customLabel": True, "dataType": "number", "isBucketed": False, "label": label,
+            "operationType": "average", "params": {"emptyAsNull": True},
+            "scale": "ratio", "sourceField": field}
+
+def col_max(field, label):
+    return {"customLabel": True, "dataType": "number", "isBucketed": False, "label": label,
+            "operationType": "max", "params": {"emptyAsNull": True},
+            "scale": "ratio", "sourceField": field}
+
+def col_formula(formula, label):
+    return {"customLabel": True, "dataType": "number", "isBucketed": False, "label": label,
+            "operationType": "formula",
+            "params": {"formula": formula, "isFormulaBroken": False}, "scale": "ratio"}
+
+def col_unique(field, label):
+    return {"customLabel": True, "dataType": "number", "isBucketed": False, "label": label,
+            "operationType": "unique_count", "params": {"emptyAsNull": True},
+            "scale": "ratio", "sourceField": field}
+
+def xy_vis(lid, cx, cy, cs=None, series="area"):
+    layer = {"layerId": lid, "layerType": "data", "seriesType": series,
+             "accessors": [cy], "xAccessor": cx}
+    if cs:
+        layer["splitAccessor"] = cs
+    return {"legend": {"isVisible": True, "position": "right"}, "valueLabels": "hide",
+            "fittingFunction": "None", "preferredSeriesType": series, "layers": [layer]}
+
+panels = []
+
+# ═══ Section 1: Cloud Provider Overview (y=0..14) ════════════════════════════
+for idx, grp in enumerate(CLOUD_GROUPS):
+    pid = f"p_label_{idx}"
+    panels.append({"type": "DASHBOARD_MARKDOWN",
+        "embeddableConfig": {"content": grp["label"]},
+        "panelIndex": pid,
+        "gridData": {"h": 2, "i": pid, "w": grp["col_width"], "x": grp["x_start"], "y": 0}})
+
+for sep_x in [15, 32]:
+    pid = f"p_sep_{sep_x}"
+    panels.append({"type": "DASHBOARD_MARKDOWN", "embeddableConfig": {"content": ""},
+        "panelIndex": pid, "gridData": {"h": 14, "i": pid, "w": 1, "x": sep_x, "y": 0}})
+
+TILE_W = 5
+tile_idx = 0
+for grp in CLOUD_GROUPS:
+    for svc_off, svc in enumerate(grp["services"]):
+        tile_idx += 1
+        pid = f"p_svc_{tile_idx}"; lid = uid(); cid = uid()
+        kql = f'service.name: "{svc}" AND severity_text: "ERROR"'
+        cols = {cid: col_count(label="Errors", kql_filter=kql)}
+        state = make_state(make_layer(lid, [cid], cols, DV_LOGS),
+            {"layerId": lid, "layerType": "data", "metricAccessor": cid,
+             "palette": PAL_ERRORS, "subtitle": svc})
+        x = grp["x_start"] + svc_off * TILE_W
+        w = TILE_W if svc_off < len(grp["services"]) - 1 else (grp["col_width"] - svc_off * TILE_W)
+        panels.append(make_panel(pid, {"h": 6, "i": pid, "w": w, "x": x, "y": 2},
+            svc, "lnsMetric", state, [make_ref(DV_LOGS, lid)]))
+
+for kidx, grp in enumerate(CLOUD_GROUPS):
+    x_base = grp["x_start"]; col_w = grp["col_width"]
+    left_w = col_w // 2; right_w = col_w - left_w
+
+    pid = f"p_pay_{kidx}_vol"; lid = uid(); cid = uid()
+    kql_svc = " OR ".join(f'service.name: "{s}"' for s in grp["services"])
+    state = make_state(make_layer(lid, [cid], {cid: col_count(label="Transactions")}, DV_LOGS),
+        {"layerId": lid, "layerType": "data", "metricAccessor": cid,
+         "color": "#54B399", "subtitle": "transactions"}, query=kql_svc)
+    panels.append(make_panel(pid, {"h": 6, "i": pid, "w": left_w, "x": x_base, "y": 8},
+        "Transactions", "lnsMetric", state, [make_ref(DV_LOGS, lid)]))
+
+    pid = f"p_pay_{kidx}_err"; lid = uid(); cid = uid()
+    state = make_state(make_layer(lid, [cid],
+        {cid: col_count(label="Errors", kql_filter='severity_text: "ERROR"')}, DV_LOGS),
+        {"layerId": lid, "layerType": "data", "metricAccessor": cid,
+         "palette": PAL_ERRORS, "subtitle": "errors"}, query=kql_svc)
+    panels.append(make_panel(pid, {"h": 6, "i": pid, "w": right_w, "x": x_base + left_w, "y": 8},
+        "Error Count", "lnsMetric", state, [make_ref(DV_LOGS, lid)]))
+
+# ═══ Section 2: RED Metrics (y=14..34) ════════════════════════════════════════
+panels.append({"type": "DASHBOARD_MARKDOWN",
+    "embeddableConfig": {"content": "**RED Metrics** · Rate · Errors · Duration"},
+    "panelIndex": "p_red_label",
+    "gridData": {"h": 2, "i": "p_red_label", "w": 48, "x": 0, "y": 14}})
+
+for pid2, pct, label, palette, x2 in [
+    ("p30", 99, "P99 Latency (µs)", PAL_P99, 0),
+    ("p31", 50, "P50 Latency (µs)", PAL_P50, 12),
+]:
+    lid = uid(); cid = uid()
+    state = make_state(make_layer(lid, [cid],
+        {cid: col_pct("transaction.duration.us", pct, label)}, DV_TRACES),
+        {"layerId": lid, "layerType": "data", "metricAccessor": cid,
+         "palette": palette, "subtitle": "microseconds"})
+    panels.append(make_panel(pid2, {"h": 6, "i": pid2, "w": 12, "x": x2, "y": 16},
+        label, "lnsMetric", state, [make_ref(DV_TRACES, lid)]))
+
+lid = uid(); cid = uid()
+state = make_state(make_layer(lid, [cid],
+    {cid: col_formula('count(kql=\'event.outcome: "failure"\') / count()', "Error Rate")}, DV_TRACES),
+    {"layerId": lid, "layerType": "data", "metricAccessor": cid,
+     "palette": PAL_ERR_RATE, "subtitle": "ratio"})
+panels.append(make_panel("p32", {"h": 6, "i": "p32", "w": 12, "x": 24, "y": 16},
+    "Error Rate", "lnsMetric", state, [make_ref(DV_TRACES, lid)]))
+
+lid = uid(); cid = uid()
+state = make_state(make_layer(lid, [cid], {cid: col_count(label="Throughput")}, DV_TRACES),
+    {"layerId": lid, "layerType": "data", "metricAccessor": cid,
+     "palette": PAL_TPUT, "subtitle": "spans"})
+panels.append(make_panel("p33", {"h": 6, "i": "p33", "w": 12, "x": 36, "y": 16},
+    "Throughput", "lnsMetric", state, [make_ref(DV_TRACES, lid)]))
+
+# P99 Latency Over Time (area, split by service)
+lid = uid(); cx = uid(); cy = uid(); cs = uid()
+cols = {cx: col_date_hist("30s"), cy: col_pct("transaction.duration.us", 99, "P99 (µs)"),
+        cs: col_terms("service.name", "Service", size=7, order_col=cy)}
+panels.append(make_panel("p34", {"h": 12, "i": "p34", "w": 24, "x": 0, "y": 22},
+    "P99 Latency Over Time by Service", "lnsXY",
+    make_state(make_layer(lid, [cx, cs, cy], cols, DV_TRACES), xy_vis(lid, cx, cy, cs, "area")),
+    [make_ref(DV_TRACES, lid)]))
+
+# Error Rate Over Time (bar_stacked, split by service)
+lid = uid(); cx = uid(); cy = uid(); cs = uid()
+cols = {cx: col_date_hist("30s"),
+        cy: col_formula('count(kql=\'event.outcome: "failure"\') / count()', "Error Rate"),
+        cs: col_terms("service.name", "Service", size=7)}
+panels.append(make_panel("p35", {"h": 12, "i": "p35", "w": 24, "x": 24, "y": 22},
+    "Error Rate Over Time by Service", "lnsXY",
+    make_state(make_layer(lid, [cx, cs, cy], cols, DV_TRACES), xy_vis(lid, cx, cy, cs, "bar_stacked")),
+    [make_ref(DV_TRACES, lid)]))
+
+# ═══ Section 3: USE Metrics (y=34..54) ════════════════════════════════════════
+panels.append({"type": "DASHBOARD_MARKDOWN",
+    "embeddableConfig": {"content": "**USE Metrics** · Utilization · Saturation · Errors"},
+    "panelIndex": "p_use_label",
+    "gridData": {"h": 2, "i": "p_use_label", "w": 48, "x": 0, "y": 34}})
+
+for pid3, label3, kql3, color3, x3 in [
+    ("p36", "Payment Volume",    None,                   "#54B399", 0),
+    ("p38", "Error Count (logs)", 'severity_text: "ERROR"', "#E7664C", 24),
+]:
+    lid = uid(); cid = uid()
+    state = make_state(make_layer(lid, [cid],
+        {cid: col_count(label=label3, kql_filter=kql3)}, DV_LOGS),
+        {"layerId": lid, "layerType": "data", "metricAccessor": cid,
+         "color": color3, "subtitle": label3.lower()})
+    panels.append(make_panel(pid3, {"h": 6, "i": pid3, "w": 12, "x": x3, "y": 36},
+        label3, "lnsMetric", state, [make_ref(DV_LOGS, lid)]))
+
+lid = uid(); cid = uid()
+state = make_state(make_layer(lid, [cid],
+    {cid: col_pct("transaction.duration.us", 99, "P99 (µs)")}, DV_LOGS),
+    {"layerId": lid, "layerType": "data", "metricAccessor": cid,
+     "palette": PAL_P99, "subtitle": "microseconds"})
+panels.append(make_panel("p37", {"h": 6, "i": "p37", "w": 12, "x": 12, "y": 36},
+    "P99 Latency (logs)", "lnsMetric", state, [make_ref(DV_LOGS, lid)]))
+
+lid = uid(); cid = uid()
+state = make_state(make_layer(lid, [cid], {cid: col_count(label="Metric Points")}, DV_METRICS),
+    {"layerId": lid, "layerType": "data", "metricAccessor": cid,
+     "color": "#6092C0", "subtitle": "OTLP metric points"})
+panels.append(make_panel("p39", {"h": 6, "i": "p39", "w": 12, "x": 36, "y": 36},
+    "Metric Ingest Volume", "lnsMetric", state, [make_ref(DV_METRICS, lid)]))
+
+# Transaction Volume Over Time (area_stacked, logs)
+lid = uid(); cx = uid(); cy = uid(); cs = uid()
+cols = {cx: col_date_hist("30s"), cy: col_count(label="Transactions"),
+        cs: col_terms("service.name", "Service", size=7, order_col=cy)}
+panels.append(make_panel("p40", {"h": 12, "i": "p40", "w": 24, "x": 0, "y": 42},
+    "Transaction Volume Over Time", "lnsXY",
+    make_state(make_layer(lid, [cx, cs, cy], cols, DV_LOGS), xy_vis(lid, cx, cy, cs, "area_stacked")),
+    [make_ref(DV_LOGS, lid)]))
+
+# Error Volume Over Time (bar_stacked, logs)
+lid = uid(); cx = uid(); cy = uid(); cs = uid()
+cols = {cx: col_date_hist("30s"),
+        cy: col_count(label="Errors", kql_filter='severity_text: "ERROR"'),
+        cs: col_terms("service.name", "Service", size=7, order_col=cy)}
+panels.append(make_panel("p41", {"h": 12, "i": "p41", "w": 24, "x": 24, "y": 42},
+    "Error Volume Over Time", "lnsXY",
+    make_state(make_layer(lid, [cx, cs, cy], cols, DV_LOGS), xy_vis(lid, cx, cy, cs, "bar_stacked")),
+    [make_ref(DV_LOGS, lid)]))
+
+# ═══ Section 4: APM & Tracing (y=54..86) ══════════════════════════════════════
+panels.append({"type": "DASHBOARD_MARKDOWN",
+    "embeddableConfig": {"content": "**APM & Tracing** · Spans · Latency · Service Dependencies"},
+    "panelIndex": "p_apm_label",
+    "gridData": {"h": 2, "i": "p_apm_label", "w": 48, "x": 0, "y": 54}})
+
+for pid4, label4, kql4, color4, x4 in [
+    ("p10", "APM Throughput",   None,                        "#54B399", 0),
+    ("p11", "APM Errors",       'event.outcome: "failure"',  "#E7664C", 12),
+]:
+    lid = uid(); cid = uid()
+    state = make_state(make_layer(lid, [cid],
+        {cid: col_count(label=label4, kql_filter=kql4)}, DV_TRACES),
+        {"layerId": lid, "layerType": "data", "metricAccessor": cid,
+         "color": color4, "subtitle": label4.lower()})
+    panels.append(make_panel(pid4, {"h": 6, "i": pid4, "w": 12, "x": x4, "y": 56},
+        label4, "lnsMetric", state, [make_ref(DV_TRACES, lid)]))
+
+lid = uid(); cid = uid()
+state = make_state(make_layer(lid, [cid], {cid: col_unique("merchant.id", "Unique Merchants")}, DV_LOGS),
+    {"layerId": lid, "layerType": "data", "metricAccessor": cid,
+     "color": "#D6BF57", "subtitle": "active merchant IDs"})
+panels.append(make_panel("p12", {"h": 6, "i": "p12", "w": 12, "x": 24, "y": 56},
+    "Active Merchants", "lnsMetric", state, [make_ref(DV_LOGS, lid)]))
+
+lid = uid(); cid = uid()
+state = make_state(make_layer(lid, [cid], {cid: col_unique("service.name", "Services")}, DV_LOGS),
+    {"layerId": lid, "layerType": "data", "metricAccessor": cid,
+     "color": "#6092C0", "subtitle": "instrumented services"})
+panels.append(make_panel("p13", {"h": 6, "i": "p13", "w": 12, "x": 36, "y": 56},
+    "Instrumented Services", "lnsMetric", state, [make_ref(DV_LOGS, lid)]))
+
+# APM Errors Over Time by Service (bar_stacked, traces)
+lid = uid(); cx = uid(); cy = uid(); cs = uid()
+cols = {cx: col_date_hist("30s"), cy: col_count(label="Errors"),
+        cs: col_terms("service.name", "Service", size=7, order_col=cy)}
+panels.append(make_panel("p14", {"h": 12, "i": "p14", "w": 24, "x": 0, "y": 62},
+    "APM Errors Over Time by Service", "lnsXY",
+    make_state(make_layer(lid, [cx, cs, cy], cols, DV_TRACES),
+               xy_vis(lid, cx, cy, cs, "bar_stacked"),
+               query='event.outcome: "failure"'),
+    [make_ref(DV_TRACES, lid)]))
+
+# Log Volume Over Time (area_stacked, logs)
+lid = uid(); cx = uid(); cy = uid(); cs = uid()
+cols = {cx: col_date_hist("30s"), cy: col_count(label="Log Count"),
+        cs: col_terms("service.name", "Service", size=7, order_col=cy)}
+panels.append(make_panel("p15", {"h": 12, "i": "p15", "w": 24, "x": 24, "y": 62},
+    "Log Volume Over Time", "lnsXY",
+    make_state(make_layer(lid, [cx, cs, cy], cols, DV_LOGS), xy_vis(lid, cx, cy, cs, "area_stacked")),
+    [make_ref(DV_LOGS, lid)]))
+
+# P99 Latency by Payment Method (area, logs)
+lid = uid(); cx = uid(); cy = uid(); cs = uid()
+cols = {cx: col_date_hist("30s"), cy: col_pct("transaction.duration.us", 99, "P99 (µs)"),
+        cs: col_terms("payment.method", "Method", size=7, order_col=cy)}
+panels.append(make_panel("p16", {"h": 12, "i": "p16", "w": 24, "x": 0, "y": 74},
+    "P99 Latency by Payment Method", "lnsXY",
+    make_state(make_layer(lid, [cx, cs, cy], cols, DV_LOGS), xy_vis(lid, cx, cy, cs, "area")),
+    [make_ref(DV_LOGS, lid)]))
+
+# Traffic by Merchant Tier (bar_stacked, logs)
+lid = uid(); cx = uid(); cy = uid(); cs = uid()
+cols = {cx: col_date_hist("30s"), cy: col_count(label="Volume"),
+        cs: col_terms("merchant.tier", "Tier", size=5, order_col=cy)}
+panels.append(make_panel("p17", {"h": 12, "i": "p17", "w": 24, "x": 24, "y": 74},
+    "Traffic by Merchant Tier", "lnsXY",
+    make_state(make_layer(lid, [cx, cs, cy], cols, DV_LOGS), xy_vis(lid, cx, cy, cs, "bar_stacked")),
+    [make_ref(DV_LOGS, lid)]))
+
+# ═══ Section 5: Detail (y=86..112) ════════════════════════════════════════════
+panels.append({"type": "DASHBOARD_MARKDOWN",
+    "embeddableConfig": {"content": "**Detail** · Service ranking · Health heatmap · Latency distribution"},
+    "panelIndex": "p_detail_label",
+    "gridData": {"h": 2, "i": "p_detail_label", "w": 48, "x": 0, "y": 86}})
+
+# Errors by Service — horizontal bar (logs)
+lid = uid(); cx = uid(); cy = uid()
+cols = {cx: col_terms("service.name", "Service", size=10, order_col=cy),
+        cy: col_count(label="Error Count", kql_filter='severity_text: "ERROR"')}
+panels.append(make_panel("p18", {"h": 12, "i": "p18", "w": 24, "x": 0, "y": 88},
+    "Errors by Service", "lnsXY",
+    make_state(make_layer(lid, [cx, cy], cols, DV_LOGS),
+        {"legend": {"isVisible": True, "position": "right"}, "valueLabels": "hide",
+         "fittingFunction": "None", "preferredSeriesType": "bar_horizontal",
+         "layers": [{"layerId": lid, "layerType": "data", "seriesType": "bar_horizontal",
+                     "accessors": [cy], "xAccessor": cx}]}),
+    [make_ref(DV_LOGS, lid)]))
+
+# Service Health Heatmap (logs)
+lid = uid(); ct = uid(); cs2 = uid(); cv = uid()
+cols = {ct: col_date_hist("1m"),
+        cs2: col_terms("service.name", "Service", size=10, order_col=cv),
+        cv: col_count(label="Error Count", kql_filter='severity_text: "ERROR"')}
+panels.append(make_panel("p19", {"h": 12, "i": "p19", "w": 24, "x": 24, "y": 88},
+    "Service Health Heatmap", "lnsHeatmap",
+    make_state(make_layer(lid, [ct, cs2, cv], cols, DV_LOGS),
+        {"gridConfig": {"isCellLabelVisible": False}, "shape": "heatmap",
+         "layerId": lid, "layerType": "data",
+         "xAccessor": ct, "yAccessor": cs2, "valueAccessor": cv,
+         "legend": {"isVisible": True, "position": "right"}}),
+    [make_ref(DV_LOGS, lid)]))
+
+# P99 vs P50 Latency — dual line (traces)
+lid = uid(); cx = uid(); cy99 = uid(); cy50 = uid()
+cols = {cx: col_date_hist("30s"),
+        cy99: col_pct("transaction.duration.us", 99, "P99 (µs)"),
+        cy50: col_pct("transaction.duration.us", 50, "P50 (µs)")}
+panels.append(make_panel("p24", {"h": 12, "i": "p24", "w": 24, "x": 0, "y": 100},
+    "P99 vs P50 Latency (Traces)", "lnsXY",
+    make_state(make_layer(lid, [cx, cy99, cy50], cols, DV_TRACES),
+        {"legend": {"isVisible": True, "position": "right"}, "valueLabels": "hide",
+         "fittingFunction": "None", "preferredSeriesType": "line",
+         "layers": [{"layerId": lid, "layerType": "data", "seriesType": "line",
+                     "accessors": [cy99, cy50], "xAccessor": cx}]}),
+    [make_ref(DV_TRACES, lid)]))
+
+# Payment Method Breakdown — donut (logs)
+lid = uid(); cs3 = uid(); cv2 = uid()
+cols = {cs3: col_terms("payment.method", "Method", size=10, order_col=cv2),
+        cv2: col_count(label="Count")}
+panels.append(make_panel("p25", {"h": 12, "i": "p25", "w": 24, "x": 24, "y": 100},
+    "Payment Method Breakdown", "lnsPie",
+    make_state(make_layer(lid, [cs3, cv2], cols, DV_LOGS),
+        {"shape": "donut", "layers": [{"layerId": lid, "layerType": "data",
+            "metric": cv2, "primaryGroups": [cs3], "secondaryGroups": [],
+            "collapseFn": "", "numberDisplay": "percent",
+            "categoryDisplay": "default", "legendDisplay": "default",
+            "nestedLegend": False, "percentDecimals": 2}]}),
+    [make_ref(DV_LOGS, lid)]))
+
+# ═══ Section 6: Significant Event Logs (y=112..128) ══════════════════════════
+panels.append({"type": "DASHBOARD_MARKDOWN",
+    "embeddableConfig": {"content": "**Significant Event Logs** · Trace-correlated PayPal error events"},
+    "panelIndex": "p_se_label",
+    "gridData": {"h": 2, "i": "p_se_label", "w": 48, "x": 0, "y": 112}})
+
+esql_q = (
+    'FROM paypal-otel-logs '
+    '| WHERE severity_text == "ERROR" '
+    '| KEEP service.name, body.text, trace.id, span.id, merchant.id, @timestamp '
+    '| SORT @timestamp DESC | LIMIT 50'
 )
-v2 = lens_esql(
-    'Log Volume by Service',
-    "FROM paypal-otel-logs | WHERE @timestamp > NOW() - 1 hours | STATS total = COUNT(*), errors = COUNT(*) BY service.name | SORT total DESC | LIMIT 10",
-    'lnsDatatable', str(uuid.uuid4()),
-    [col('c1','service.name','string'), col('c2','total','number'), col('c3','errors','number')],
-)
-v3 = lens_esql(
-    'P99 Latency by Service (ms)',
-    "FROM paypal-otel-logs | WHERE @timestamp > NOW() - 1 hours | EVAL duration_ms = transaction.duration.us / 1000 | STATS p99_ms = MAX(duration_ms) BY service.name | SORT p99_ms DESC | LIMIT 10",
-    'lnsXY', str(uuid.uuid4()),
-    [col('c1','service.name','string'), col('c2','p99_ms','number')],
-)
-v4 = lens_esql(
-    'Error Rate by Service (%)',
-    "FROM paypal-otel-logs | WHERE @timestamp > NOW() - 1 hours | STATS total = COUNT(*), errors = COUNT(*) BY service.name | EVAL error_pct = ROUND(errors * 100.0 / total, 1) | KEEP service.name, total, errors, error_pct | SORT error_pct DESC | LIMIT 10",
-    'lnsDatatable', str(uuid.uuid4()),
-    [col('c1','service.name','string'), col('c2','total','number'), col('c3','errors','number'), col('c4','error_pct','number')],
-)
+lid_es = uid(); adhoc_id = uid()
 
-# Dashboard panels layout (2×2 grid)
-panels = json.dumps([
-    {'type':'lens','gridData':{'x':0,'y':0,'w':24,'h':15,'i':'p1'},'panelIndex':'p1','embeddableConfig':{'attributes':v1['attributes'],'enhancements':{}},'title':'Errors by Service'},
-    {'type':'lens','gridData':{'x':24,'y':0,'w':24,'h':15,'i':'p2'},'panelIndex':'p2','embeddableConfig':{'attributes':v2['attributes'],'enhancements':{}},'title':'Log Volume'},
-    {'type':'lens','gridData':{'x':0,'y':15,'w':24,'h':15,'i':'p3'},'panelIndex':'p3','embeddableConfig':{'attributes':v3['attributes'],'enhancements':{}},'title':'P99 Latency (ms)'},
-    {'type':'lens','gridData':{'x':24,'y':15,'w':24,'h':15,'i':'p4'},'panelIndex':'p4','embeddableConfig':{'attributes':v4['attributes'],'enhancements':{}},'title':'Error Rate %'},
-])
+def esql_col(field, es_type, col_type):
+    return {"columnId": uid(), "fieldName": field, "label": field,
+            "customLabel": False, "meta": {"esType": es_type, "type": col_type}}
+
+esql_cols = [
+    esql_col("service.name", "keyword", "string"),
+    esql_col("body.text",    "text",    "string"),
+    esql_col("trace.id",     "keyword", "string"),
+    esql_col("merchant.id",  "keyword", "string"),
+    esql_col("@timestamp",   "date",    "date"),
+]
+esql_state = {
+    "adHocDataViews": {adhoc_id: {
+        "allowHidden": False, "allowNoIndex": False, "fieldFormats": {}, "id": adhoc_id,
+        "name": DV_LOGS, "runtimeFieldMap": {}, "sourceFilters": [],
+        "timeFieldName": "@timestamp", "title": DV_LOGS, "type": "esql"}},
+    "datasourceStates": {"textBased": {"layers": {lid_es: {
+        "index": adhoc_id, "query": {"esql": esql_q},
+        "columns": esql_cols, "timeField": "@timestamp"}}}},
+    "filters": [],
+    "internalReferences": [{"id": adhoc_id,
+        "name": f"textBasedLanguages-datasource-layer-{lid_es}", "type": "index-pattern"}],
+    "query": {"esql": esql_q},
+    "visualization": {"layerId": lid_es, "layerType": "data",
+        "columns": [{"columnId": c["columnId"]} for c in esql_cols],
+        "paging": {"enabled": True, "size": 10}},
+}
+panels.append(make_panel("p26", {"h": 14, "i": "p26", "w": 48, "x": 0, "y": 114},
+    "Significant Event Logs", "lnsDatatable", esql_state, []))
+
+# ── Collect references and build dashboard ────────────────────────────────────
+all_refs = []; seen = set()
+for panel in panels:
+    for ref in panel.get("embeddableConfig", {}).get("attributes", {}).get("references", []):
+        if ref["name"] not in seen:
+            all_refs.append(ref); seen.add(ref["name"])
 
 dash_obj = {
-    'type': 'dashboard',
-    'id': 'paypal-merchant-observability-dashboard',
-    'attributes': {
-        'title': 'PayPal Merchant Observability',
-        'description': 'Live PayPal telemetry — errors, latency, and throughput by service',
-        'panelsJSON': panels,
-        'optionsJSON': json.dumps({'hidePanelTitles': False, 'useMargins': True}),
-        'version': 1,
-        'timeRestore': True,
-        'timeTo': 'now',
-        'timeFrom': 'now-1h',
-        'refreshInterval': {'pause': False, 'value': 10000},
-        'kibanaSavedObjectMeta': {'searchSourceJSON': json.dumps({'query': {'query': '', 'language': 'kuery'}, 'filter': []})},
+    "type": "dashboard", "id": DASHBOARD_ID,
+    "attributes": {
+        "title": DASHBOARD_TITLE,
+        "description": "PayPal service health, RED/USE metrics, APM tracing, and significant event logs across AWS/GCP/Azure",
+        "panelsJSON": json.dumps(panels),
+        "optionsJSON": json.dumps({"hidePanelTitles": False, "useMargins": True, "syncColors": True}),
+        "version": 1, "timeRestore": True, "timeTo": "now", "timeFrom": "now-2m",
+        "refreshInterval": {"pause": False, "value": 10000},
+        "kibanaSavedObjectMeta": {"searchSourceJSON": json.dumps(
+            {"query": {"query": "", "language": "kuery"}, "filter": []})},
     },
-    'references': [],
+    "references": all_refs,
+    "coreMigrationVersion": "8.8.0", "managed": False, "typeMigrationVersion": "10.3.0",
 }
 
-ndjson = json.dumps({'objects': [dash_obj]}).encode()
-
-# Import the dashboard
+boundary = "----FormBoundary7MA4YWxkTrZu0gW"
+ndjson_body = (json.dumps(dash_obj, separators=(",", ":")) + "\n").encode()
+body = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="dashboard.ndjson"\r\n'
+        f'Content-Type: application/x-ndjson\r\n\r\n').encode() + ndjson_body + f'\r\n--{boundary}--\r\n'.encode()
 req = urllib.request.Request(
-    f'{KIBANA}/api/saved_objects/_import?overwrite=true',
-    data=None, method='POST',
-    headers={'Authorization': AUTH, 'kbn-xsrf': 'true'})
-# Use multipart form for _import endpoint
-import io
-boundary = b'----FormBoundary'
-body_parts = [
-    b'------FormBoundary\r\nContent-Disposition: form-data; name="file"; filename="dashboard.ndjson"\r\nContent-Type: application/x-ndjson\r\n\r\n',
-    (json.dumps(dash_obj) + '\n').encode(),
-    b'\r\n------FormBoundary--\r\n',
-]
-body = b''.join(body_parts)
-req2 = urllib.request.Request(
-    f'{KIBANA}/api/saved_objects/_import?overwrite=true',
-    data=body, method='POST',
-    headers={
-        'Authorization': AUTH,
-        'kbn-xsrf': 'true',
-        'Content-Type': 'multipart/form-data; boundary=----FormBoundary',
-    })
+    f'{KIBANA}/api/saved_objects/_import?overwrite=true', data=body, method='POST',
+    headers={'Authorization': AUTH, 'kbn-xsrf': 'true',
+             'Content-Type': f'multipart/form-data; boundary={boundary}'})
 try:
-    with urllib.request.urlopen(req2, context=CTX, timeout=30) as r:
-        resp2 = json.loads(r.read())
-        print(f'Dashboard import: success={resp2.get("success")}, '
-              f'created={len(resp2.get("successResults",[]))}')
+    with urllib.request.urlopen(req, context=CTX, timeout=30) as r:
+        resp = json.loads(r.read())
+        print(f'Dashboard import: success={resp.get("success")} created={len(resp.get("successResults",[]))}')
+        if not resp.get("success"):
+            print(f'  errors: {resp.get("errors", [])[:3]}')
 except Exception as ex:
     print(f'Dashboard import error: {ex}')
 KIBANA_DASH_EOF
 
-  echo "Kibana data view + dashboard setup done ✓"
+  echo "Kibana data views + PayPal Executive Dashboard done ✓"
 else
   echo "WARN: Skipping Kibana dashboard setup — KIBANA_URL or BASE64 not set"
 fi
