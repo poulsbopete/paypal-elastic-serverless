@@ -118,6 +118,16 @@ In Kibana, go to **Observability** → **Alerts**. You should see one or more al
 
 ---
 
-## Step 5 — Resolve the Fault
+## Step 5 — Watch Elastic Workflows Auto-Remediate
 
-Return to **Demo App** → **Chaos Controller** and resolve the incident. Observe the error rate dropping back to baseline in the **Elastic Serverless** tab.
+No manual intervention needed. The Elastic Workflows triggered by the alert are already executing the remediation playbook in the background.
+
+In Kibana, go to **Observability** → **Workflows** and open the **PayPal Payment Incident Remediation** workflow. You'll see the execution log — Elastic has already:
+
+1. Detected the anomaly via the alert rule
+2. Queried recent error logs to identify the affected service
+3. Run AI root cause analysis
+4. Executed the remediation action
+5. Logged the outcome and updated the alert status
+
+Watch the error rate in **Elastic Serverless** → **Dashboards** drop back to baseline as the workflow completes — without a single manual step.
