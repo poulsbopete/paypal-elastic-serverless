@@ -1471,47 +1471,62 @@ def probe_otlp_auth(url, apm_key, api_key, basic_auth):
         log.warning('  rejected: %s', body[:200])
     return None
 
-def es_bulk_write(es_url, auth_header, docs):
-    """Write docs directly to ES data stream via _bulk — fallback when OTLP auth fails."""
+def _bulk_write(es_url, auth_header, index, docs):
+    """Write docs to an ES index/data-stream via _bulk.
+    Returns (success_count, error_reason_or_None)."""
     lines = []
     for doc in docs:
         lines.append('{"create":{}}')
         lines.append(json.dumps(doc))
     body = ('\n'.join(lines) + '\n').encode()
-    status, resp = _http_post(f'{es_url}/logs-apm.otel-default/_bulk', auth_header, body)
-    if status in (200, 201):
-        return True
-    # Try creating the data stream first if it doesn't exist
-    if status == 404:
-        _http_post(f'{es_url}/_data_stream/logs-apm.otel-default', auth_header, b'')
-        status, resp = _http_post(f'{es_url}/logs-apm.otel-default/_bulk', auth_header, body)
-        if status in (200, 201):
-            return True
-    log.warning('ES bulk HTTP %s: %s', status, resp[:200])
-    return False
+    req = urllib.request.Request(
+        f'{es_url}/{index}/_bulk', data=body,
+        headers={'Authorization': auth_header, 'Content-Type': 'application/x-ndjson'},
+        method='POST')
+    try:
+        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=15) as r:
+            resp = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return 0, f'HTTP {e.code}: {e.read().decode("utf-8","replace")[:200]}'
+    except Exception as e:
+        return 0, str(e)
+
+    if resp.get('errors'):
+        errors = [i.get('create',{}).get('error',{}).get('reason','?')
+                  for i in resp.get('items',[]) if i.get('create',{}).get('error')]
+        if errors:
+            return 0, errors[0]
+    successes = sum(1 for i in resp.get('items',[])
+                    if i.get('create',{}).get('status') in (200,201))
+    return successes, None
+
+def es_bulk_write(es_url, auth_header, index, docs):
+    n, err = _bulk_write(es_url, auth_header, index, docs)
+    if err:
+        log.warning('ES bulk [%s] error: %s', index, err)
+        return False
+    return n > 0
 
 def probe_es_direct(es_url, api_key):
-    """Try writing directly to ES data stream; return auth header or None."""
+    """Try writing a test doc directly to ES; return (auth_header, index) or None."""
     if not es_url or not api_key:
         return None
-    # Ensure the data stream exists
     auth = f'ApiKey {api_key}'
     from datetime import datetime, timezone
-    doc = {
+    test_doc = {
         '@timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
         'service.name': 'checkout-service',
         'severity_text': 'INFO',
         'body.text': 'ES-direct probe',
+        'trace.id': 'probe000',
     }
-    body = ('{"create":{}}\n' + json.dumps(doc) + '\n').encode()
-    # Try creating data stream if needed
-    _http_post(f'{es_url}/_data_stream/logs-apm.otel-default', auth, b'')
-    status, resp = _http_post(f'{es_url}/logs-apm.otel-default/_bulk', auth, body)
-    log.info('ES direct write probe: HTTP %s', status)
-    if status in (200, 201):
-        log.info('ES DIRECT WRITE OK ✓ — indexing to logs-apm.otel-default via ES API')
-        return auth
-    log.warning('ES direct write failed: %s', resp[:200])
+    # Try managed data stream first, then custom index
+    for index in ('logs-apm.otel-default', 'paypal-logs-default'):
+        n, err = _bulk_write(es_url, auth, index, [test_doc])
+        log.info('ES probe [%s]: %s', index, 'OK' if n > 0 else f'FAIL – {err}')
+        if n > 0:
+            log.info('ES DIRECT WRITE OK ✓ — using index [%s]', index)
+            return auth, index
     return None
 
 def make_es_log_docs(svcs, n_per_svc=3):
@@ -1575,16 +1590,18 @@ def main():
             mode, auth_header = result
 
     # Strategy 2: Write directly to ES data stream via _bulk
+    es_index = None
     if not mode and es_url and api_key:
-        auth_header = probe_es_direct(es_url, api_key)
-        if auth_header:
+        result = probe_es_direct(es_url, api_key)
+        if result:
+            auth_header, es_index = result
             mode = 'es-direct'
 
     if not mode:
         log.error('No working write method found — giving up.')
         sys.exit(1)
 
-    log.info('Using mode: %s', mode)
+    log.info('Using mode: %s  index: %s', mode, es_index or 'n/a')
     tick = 0
     while True:
         try:
@@ -1600,9 +1617,9 @@ def main():
                     if ok: log.info('[otlp] Sent metrics ✓')
             else:  # es-direct
                 docs = make_es_log_docs(SERVICES, random.randint(2,5))
-                ok = es_bulk_write(es_url, auth_header, docs)
+                ok = es_bulk_write(es_url, auth_header, es_index, docs)
                 if ok:
-                    log.info('[es-direct] Indexed %d log docs (tick %d)', len(docs), tick)
+                    log.info('[es-direct→%s] Indexed %d docs (tick %d)', es_index, len(docs), tick)
         except Exception as e:
             log.error('Generator loop error: %s', e)
         tick += 1
