@@ -880,7 +880,196 @@ if patched_files:
 else:
     print("WARN: No files matched — channel definitions may use a different format", file=sys.stderr)
 PAYPAL_PATCH_EOF
+
+# Rename service module files to match the patched import paths in scenario.py.
+# The content patch above rewrites 'digital_marketplace' → 'merchant_api' inside
+# scenario.py, but the actual .py files on disk still have the old names.
+SVCDIR="/opt/elastic-launch-demo/scenarios/fanatics/services"
+declare -A FILE_RENAMES=(
+  ["digital_marketplace.py"]="merchant_api.py"
+  ["auction_engine.py"]="payments_orchestrator.py"
+  ["cloud_inventory_scanner.py"]="fraud_decisioning.py"
+  ["packaging_fulfillment.py"]="settlement_service.py"
+  ["card_grading_service.py"]="merchant_support_api.py"
+  ["authentication_service.py"]="notification_service.py"
+  ["fulfillment_service.py"]="notification_service.py"
+)
+for OLD in "${!FILE_RENAMES[@]}"; do
+  NEW="${FILE_RENAMES[$OLD]}"
+  if [[ -f "$SVCDIR/$OLD" && ! -f "$SVCDIR/$NEW" ]]; then
+    mv "$SVCDIR/$OLD" "$SVCDIR/$NEW"
+    echo "Renamed service file: $OLD → $NEW ✓"
+  elif [[ -f "$SVCDIR/$NEW" ]]; then
+    echo "Service file already renamed: $NEW (skipping $OLD)"
+  fi
+done
 echo "Demo app PayPal patch complete ✓"
+
+# Remove the "Elastic Observability" and "API Endpoints" sections from the landing page.
+# These contain broken placeholder URLs and internal API links not useful in the demo.
+python3 - <<'LANDING_PATCH_EOF'
+import re, sys
+
+path = "/opt/elastic-launch-demo/app/landing/static/index.html"
+try:
+    with open(path) as f:
+        content = f.read()
+
+    # Remove each section block (comment + <section> tag through closing </section>)
+    patterns = [
+        r'<!-- Elastic / Kibana Links -->\s*<section[^>]*>.*?</section>',
+        r'<!-- API &amp; Utility Links -->\s*<section[^>]*>.*?</section>',
+        r'<!-- API & Utility Links -->\s*<section[^>]*>.*?</section>',
+    ]
+    patched = content
+    for p in patterns:
+        patched = re.sub(p, '', patched, flags=re.DOTALL)
+
+    if patched != content:
+        with open(path, "w") as f:
+            f.write(patched)
+        print("landing/static/index.html: removed Elastic Observability + API Endpoints sections ✓")
+    else:
+        print("WARN: sections not found in landing page — may already be removed or HTML changed", file=sys.stderr)
+except Exception as e:
+    print(f"WARN: landing page patch failed: {e}", file=sys.stderr)
+LANDING_PATCH_EOF
+
+# Fix "← BACK" buttons in chaos and dashboard pages.
+# They use javascript:history.back() which does nothing in Instruqt's iframe
+# (no browser history exists when the tab first loads). Replace with /home.
+python3 - <<'BACK_BTN_PATCH_EOF'
+import sys
+
+FILES = [
+    "/opt/elastic-launch-demo/app/chaos_ui/static/index.html",
+    "/opt/elastic-launch-demo/app/dashboard/static/index.html",
+]
+OLD = 'href="javascript:history.back()"'
+NEW = 'href="/home"'
+
+for path in FILES:
+    try:
+        with open(path) as f:
+            content = f.read()
+        if OLD in content:
+            with open(path, "w") as f:
+                f.write(content.replace(OLD, NEW))
+            print(f"{path}: back button fixed ✓")
+        else:
+            print(f"WARN: back button pattern not found in {path}", file=sys.stderr)
+    except Exception as e:
+        print(f"WARN: {path}: {e}", file=sys.stderr)
+BACK_BTN_PATCH_EOF
+
+# Patch main.py: return static CHANNEL_REGISTRY when no deployment is active
+# so the chaos dropdown always shows all 20 channels, even before a deployment starts
+python3 - <<'CHAOS_PATCH_EOF'
+import re, sys
+
+path = "/opt/elastic-launch-demo/app/main.py"
+try:
+    with open(path) as f:
+        content = f.read()
+
+    OLD = (
+        "@app.get(\"/api/chaos/status\")\n"
+        "async def chaos_status(deployment_id: Optional[str] = None):\n"
+        "    inst = _get_instance(deployment_id)\n"
+        "    if not inst:\n"
+        "        return {}\n"
+        "    return inst.chaos_controller.get_status()"
+    )
+    NEW = (
+        "@app.get(\"/api/chaos/status\")\n"
+        "async def chaos_status(deployment_id: Optional[str] = None):\n"
+        "    inst = _get_instance(deployment_id)\n"
+        "    if not inst:\n"
+        "        from app.config import CHANNEL_REGISTRY\n"
+        "        return {\n"
+        "            ch_id: {\n"
+        "                \"name\": ch_def[\"name\"],\n"
+        "                \"subsystem\": ch_def.get(\"subsystem\", \"\"),\n"
+        "                \"state\": \"STANDBY\",\n"
+        "                \"mode\": \"calibration_drift\",\n"
+        "                \"triggered_at\": None,\n"
+        "                \"session_id\": None,\n"
+        "                \"affected_services\": ch_def.get(\"affected_services\", []),\n"
+        "                \"description\": ch_def.get(\"description\", \"\"),\n"
+        "            }\n"
+        "            for ch_id, ch_def in CHANNEL_REGISTRY.items()\n"
+        "        }\n"
+        "    return inst.chaos_controller.get_status()"
+    )
+
+    if OLD in content:
+        patched = content.replace(OLD, NEW)
+        with open(path, "w") as f:
+            f.write(patched)
+        print("main.py: chaos_status fallback patched ✓")
+    else:
+        print("WARN: chaos_status pattern not found in main.py — may already be patched or upstream changed", file=sys.stderr)
+except Exception as e:
+    print(f"WARN: chaos_status patch failed: {e}", file=sys.stderr)
+CHAOS_PATCH_EOF
+
+# Patch deployer.py: accept HTTP 405 as a valid OTLP endpoint response.
+# Elastic Serverless OTLP only accepts POST — HEAD returns 405, which the
+# original code treats as failure and leaves otlp_endpoint empty.
+python3 - <<'DEPLOYER_PATCH_EOF'
+import sys
+
+path = "/opt/elastic-launch-demo/elastic_config/deployer.py"
+try:
+    with open(path) as f:
+        content = f.read()
+
+    OLD = "if response.status_code in (200, 400, 415):"
+    NEW = "if response.status_code in (200, 400, 405, 415):"
+
+    if OLD in content:
+        patched = content.replace(OLD, NEW)
+        with open(path, "w") as f:
+            f.write(patched)
+        print("deployer.py: OTLP 405 acceptance patched ✓")
+    else:
+        print("WARN: OTLP status check pattern not found in deployer.py", file=sys.stderr)
+except Exception as e:
+    print(f"WARN: deployer.py patch failed: {e}", file=sys.stderr)
+DEPLOYER_PATCH_EOF
+
+# Also patch telemetry.py: log errors when OTLP sends fail (currently they're silent)
+python3 - <<'TELEMETRY_PATCH_EOF'
+import sys
+
+path = "/opt/elastic-launch-demo/app/telemetry.py"
+try:
+    with open(path) as f:
+        content = f.read()
+
+    OLD = (
+        "        except httpx.RequestError as exc:\n"
+        "            self.consecutive_failures += 1"
+    )
+    NEW = (
+        "        except httpx.HTTPStatusError as exc:\n"
+        "            self.consecutive_failures += 1\n"
+        "            logger.warning(\"OTLP %s HTTP error: %s %s\", signal_name, exc.response.status_code, exc.response.text[:200])\n"
+        "        except httpx.RequestError as exc:\n"
+        "            self.consecutive_failures += 1\n"
+        "            logger.warning(\"OTLP %s network error: %s\", signal_name, exc)"
+    )
+
+    if OLD in content:
+        patched = content.replace(OLD, NEW)
+        with open(path, "w") as f:
+            f.write(patched)
+        print("telemetry.py: OTLP error logging patched ✓")
+    else:
+        print("WARN: OTLP except pattern not found in telemetry.py", file=sys.stderr)
+except Exception as e:
+    print(f"WARN: telemetry.py patch failed: {e}", file=sys.stderr)
+TELEMETRY_PATCH_EOF
 
 echo "Creating systemd service for demo app (port $DEMO_PORT)..."
 cat > /etc/systemd/system/elastic-demo.service <<EOF
@@ -932,12 +1121,42 @@ done
 DEMO_KIBANA_URL="${KIBANA_URL:-}"
 DEMO_API_KEY="${ELASTICSEARCH_API_KEY:-}"
 
+# Derive OTLP endpoint explicitly — the deployer's auto-detection uses a HEAD
+# request which Elastic Serverless rejects with 405, causing silent failure.
+# We bypass that by computing and passing otlp_url directly.
+DEMO_ES_URL="${ES_URL:-}"
+DEMO_OTLP_URL=""
+if [[ -n "$DEMO_ES_URL" ]]; then
+  # Swap .es. for .ingest. to get the OTLP endpoint
+  DEMO_OTLP_URL="${DEMO_ES_URL/.es./.ingest.}"
+  # Remove any trailing slash then append :443 if not already present
+  DEMO_OTLP_URL="${DEMO_OTLP_URL%/}"
+  if [[ "$DEMO_OTLP_URL" != *":443" ]]; then
+    DEMO_OTLP_URL="${DEMO_OTLP_URL}:443"
+  fi
+  echo "Derived OTLP endpoint: $DEMO_OTLP_URL"
+fi
+
 if [[ "$DEMO_HEALTHY" == "true" && -n "$DEMO_KIBANA_URL" && -n "$DEMO_API_KEY" ]]; then
+  # Test OTLP endpoint before launching — log the HTTP status so we know if auth works
+  if [[ -n "$DEMO_OTLP_URL" ]]; then
+    echo "Testing OTLP endpoint: $DEMO_OTLP_URL/v1/logs ..."
+    OTLP_HTTP_CODE=$(curl -s -o /tmp/otlp_test.json -w "%{http_code}" \
+      -X POST "${DEMO_OTLP_URL}/v1/logs" \
+      -H "Authorization: ApiKey ${DEMO_API_KEY}" \
+      -H "Content-Type: application/json" \
+      -d '{"resourceLogs":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"setup-test"}}]},"scopeLogs":[{"scope":{},"logRecords":[{"timeUnixNano":"'$(date +%s%N)'","body":{"stringValue":"otlp test"},"attributes":[]}]}]}]}' \
+      2>/dev/null || echo "000")
+    echo "OTLP test response: HTTP $OTLP_HTTP_CODE"
+    cat /tmp/otlp_test.json 2>/dev/null || true
+    echo ""
+  fi
+
   echo "Launching fanatics scenario against $DEMO_KIBANA_URL ..."
 
   curl -sf -X POST "http://localhost:${DEMO_PORT}/api/setup/launch" \
     -H 'Content-Type: application/json' \
-    -d "{\"scenario_id\":\"fanatics\",\"kibana_url\":\"${DEMO_KIBANA_URL}\",\"api_key\":\"${DEMO_API_KEY}\"}" \
+    -d "{\"scenario_id\":\"fanatics\",\"kibana_url\":\"${DEMO_KIBANA_URL}\",\"api_key\":\"${DEMO_API_KEY}\",\"otlp_url\":\"${DEMO_OTLP_URL}\"}" \
     >/dev/null 2>&1 || echo "WARN: Launch request failed — learners can launch manually via the Demo App tab."
 
   echo "Waiting for deployment to register..."
@@ -957,6 +1176,139 @@ elif [[ "$DEMO_HEALTHY" != "true" ]]; then
   echo "WARN: Skipping scenario launch — demo app never became healthy."
 else
   echo "WARN: Missing Kibana URL or API key — skipping auto-launch."
+fi
+
+# ── ML Anomaly Detection Jobs ─────────────────────────────────────────────────
+# Create 3 ML jobs that detect anomalies in PayPal merchant transactions.
+# Jobs run against logs.otel once data starts flowing.
+if [[ -n "$ES_URL" && -n "$ELASTICSEARCH_API_KEY" ]]; then
+  echo "Creating PayPal ML anomaly detection jobs..."
+
+  # Helper: create a job + datafeed, open + start
+  create_ml_job() {
+    local JOB_ID="$1"
+    local JOB_JSON="$2"
+    local FEED_JSON="$3"
+
+    # Create job
+    HTTP=$(curl -s -o /tmp/ml_resp.json -w "%{http_code}" -X PUT \
+      "${ES_URL}/_ml/anomaly_detectors/${JOB_ID}?pretty" \
+      -H "Authorization: ApiKey ${ELASTICSEARCH_API_KEY}" \
+      -H "Content-Type: application/json" \
+      -d "$JOB_JSON")
+    if [[ "$HTTP" == "200" || "$HTTP" == "201" ]]; then
+      echo "  ML job created: $JOB_ID ✓"
+    else
+      echo "  WARN: ML job $JOB_ID returned HTTP $HTTP"
+      cat /tmp/ml_resp.json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('error',{}).get('reason',''))" 2>/dev/null || true
+      return
+    fi
+
+    # Create datafeed
+    curl -s -o /dev/null -X PUT \
+      "${ES_URL}/_ml/datafeeds/datafeed-${JOB_ID}" \
+      -H "Authorization: ApiKey ${ELASTICSEARCH_API_KEY}" \
+      -H "Content-Type: application/json" \
+      -d "$FEED_JSON" || true
+
+    # Open job
+    curl -s -o /dev/null -X POST \
+      "${ES_URL}/_ml/anomaly_detectors/${JOB_ID}/_open" \
+      -H "Authorization: ApiKey ${ELASTICSEARCH_API_KEY}" || true
+
+    # Start datafeed (real-time from now)
+    curl -s -o /dev/null -X POST \
+      "${ES_URL}/_ml/datafeeds/datafeed-${JOB_ID}/_start" \
+      -H "Authorization: ApiKey ${ELASTICSEARCH_API_KEY}" \
+      -H "Content-Type: application/json" \
+      -d '{"start":"now-1h"}' || true
+  }
+
+  # Job 1: Error spike per service — catches P1 incidents instantly
+  create_ml_job "paypal-service-error-spike" \
+  '{
+    "description": "PayPal — detect error rate spikes per service (payment failures, 5xx storms)",
+    "analysis_config": {
+      "bucket_span": "5m",
+      "detectors": [{
+        "function": "high_count",
+        "detector_description": "Unusually high error log count",
+        "partition_field_name": "service.name"
+      }],
+      "influencers": ["service.name"]
+    },
+    "data_description": { "time_field": "@timestamp" },
+    "analysis_limits": { "model_memory_limit": "20mb" },
+    "custom_settings": { "created_by": "paypal-elastic-serverless" }
+  }' \
+  "{
+    \"job_id\": \"paypal-service-error-spike\",
+    \"indices\": [\"logs.otel\"],
+    \"query\": {\"term\": {\"severity_text\": {\"value\": \"ERROR\"}}},
+    \"scroll_size\": 1000,
+    \"frequency\": \"1m\",
+    \"query_delay\": \"60s\"
+  }"
+
+  # Job 2: Transaction volume anomaly — catches traffic drops (outages) and surges (attacks)
+  create_ml_job "paypal-transaction-volume-anomaly" \
+  '{
+    "description": "PayPal — detect unusual transaction volumes per service (drops or surges)",
+    "analysis_config": {
+      "bucket_span": "5m",
+      "detectors": [{
+        "function": "count",
+        "detector_description": "Unusual transaction volume",
+        "partition_field_name": "service.name"
+      }],
+      "influencers": ["service.name"]
+    },
+    "data_description": { "time_field": "@timestamp" },
+    "analysis_limits": { "model_memory_limit": "20mb" },
+    "custom_settings": { "created_by": "paypal-elastic-serverless" }
+  }' \
+  "{
+    \"job_id\": \"paypal-transaction-volume-anomaly\",
+    \"indices\": [\"logs.otel\"],
+    \"query\": {\"match_all\": {}},
+    \"scroll_size\": 1000,
+    \"frequency\": \"1m\",
+    \"query_delay\": \"60s\"
+  }"
+
+  # Job 3: Checkout service degradation — watches checkout-service + payments-orchestrator
+  create_ml_job "paypal-checkout-degradation" \
+  '{
+    "description": "PayPal — detect checkout and payment orchestration degradation",
+    "analysis_config": {
+      "bucket_span": "5m",
+      "detectors": [{
+        "function": "high_count",
+        "detector_description": "Error surge in checkout pipeline",
+        "partition_field_name": "service.name"
+      }],
+      "influencers": ["service.name"]
+    },
+    "data_description": { "time_field": "@timestamp" },
+    "analysis_limits": { "model_memory_limit": "20mb" },
+    "custom_settings": { "created_by": "paypal-elastic-serverless" }
+  }' \
+  "{
+    \"job_id\": \"paypal-checkout-degradation\",
+    \"indices\": [\"logs.otel\"],
+    \"query\": {
+      \"terms\": {
+        \"service.name\": [\"checkout-service\", \"payments-orchestrator\", \"fraud-decisioning\", \"merchant-api\"]
+      }
+    },
+    \"scroll_size\": 1000,
+    \"frequency\": \"1m\",
+    \"query_delay\": \"60s\"
+  }"
+
+  echo "ML anomaly detection jobs created and started ✓"
+else
+  echo "WARN: Skipping ML jobs — ES_URL or API key not set."
 fi
 
 # Create real executables in /usr/local/bin so they work in Instruqt terminal tabs
