@@ -733,8 +733,25 @@ else
   echo "Participant email resolved: $PARTICIPANT_EMAIL"
 fi
 
-# Demo app runs the fanatics scenario (identical telemetry stack).
-# PayPal branding is in the Instruqt challenge content; no app-level patching needed.
+echo "Patching display names: Fanatics → PayPal..."
+# Only replace user-visible strings. Never touch class names, scenario_id, or import paths.
+SCENARIO_PY="$DEMO_DIR/scenarios/fanatics/scenario.py"
+if [[ -f "$SCENARIO_PY" ]]; then
+  perl -i \
+    -pe 's/Fanatics Live/PayPal Merchant Observability/g' \
+    -pe 's/("scenario_name"\s*:\s*)"[^"]*Fanatic[^"]*"/\1"PayPal Merchant Observability"/g' \
+    -pe 's/Fanatics e-commerce/PayPal merchant payments/g' \
+    -pe 's/fanatics\.com/paypal\.com/g' \
+    "$SCENARIO_PY" 2>/dev/null || true
+  echo "Scenario display name patched ✓"
+else
+  echo "WARN: $SCENARIO_PY not found — skipping name patch"
+fi
+
+# Patch any HTML templates that show "Fanatics" as a visible label
+find "$DEMO_DIR/app" -name "*.html" -o -name "*.js" 2>/dev/null \
+  | xargs perl -i -pe 's/Fanatics Live/PayPal Merchant Observability/g; s/\bFanatics\b/PayPal/g' 2>/dev/null || true
+echo "UI templates patched ✓"
 
 echo "Creating systemd service for demo app (port $DEMO_PORT)..."
 cat > /etc/systemd/system/elastic-demo.service <<EOF
