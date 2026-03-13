@@ -1169,39 +1169,6 @@ DEMO_OTLP_URL=""
 # Elastic Serverless Observability projects expose a dedicated APM/OTLP endpoint
 # that is separate from the Elasticsearch URL. Using it directly is more reliable
 # than deriving a URL from the ES endpoint.
-DEMO_OTLP_URL=$(python3 -c "
-import json, sys
-try:
-    import os
-    regions = os.environ.get('REGIONS','')
-    with open('/tmp/project_results.json') as f:
-        d = json.load(f)
-    # Try the configured region first, then the first key
-    region_data = d.get(regions) or next(iter(d.values()), {})
-    endpoints = region_data.get('endpoints', {})
-    # Try apm, apm_server, fleet, ingest_endpoint in priority order
-    for key in ('apm', 'apm_server', 'fleet', 'ingest', 'ingest_endpoint'):
-        url = endpoints.get(key, '').strip().rstrip('/')
-        if url:
-            print(url)
-            break
-except Exception as e:
-    sys.stderr.write(str(e) + '\n')
-" 2>/dev/null || true)
-
-if [[ -n "$DEMO_OTLP_URL" ]]; then
-  echo "OTLP endpoint (from project apm key): $DEMO_OTLP_URL"
-else
-  # Priority 2: Derive from ES URL by swapping .es. → .ingest.
-  if [[ -n "$DEMO_ES_URL" ]]; then
-    DEMO_OTLP_URL="${DEMO_ES_URL/.es./.ingest.}"
-    DEMO_OTLP_URL=$(echo "$DEMO_OTLP_URL" | sed 's|/$||; s|:[0-9]\{2,5\}$||')
-    DEMO_OTLP_URL="${DEMO_OTLP_URL}:443"
-    echo "OTLP endpoint (derived from ES URL): $DEMO_OTLP_URL"
-  fi
-fi
-
-# Log all available endpoints for diagnostics
 echo "--- All project endpoints ---"
 python3 -c "
 import json
@@ -1213,6 +1180,36 @@ for region, data in d.items():
         print(f'  {k}: {v}')
 " 2>/dev/null || true
 echo "-----------------------------"
+
+# Determine the OTLP endpoint.
+# For Elastic Serverless Observability, the 'apm' endpoint is the correct OTLP target.
+DEMO_OTLP_URL=$(python3 -c "
+import json, sys, os
+try:
+    with open('/tmp/project_results.json') as f:
+        d = json.load(f)
+    region_data = d.get(os.environ.get('REGIONS','')) or next(iter(d.values()), {})
+    endpoints = region_data.get('endpoints', {})
+    # 'apm' is the APM server / OTLP endpoint for Serverless Observability
+    for key in ('apm', 'apm_server', 'ingest', 'ingest_endpoint'):
+        url = endpoints.get(key, '').strip().rstrip('/')
+        if url:
+            sys.stderr.write(f'Using endpoint key [{key}]: {url}\n')
+            print(url)
+            break
+except Exception as e:
+    sys.stderr.write(f'endpoint lookup error: {e}\n')
+" 2>&1 | tee /tmp/otlp_endpoint_detection.log | grep '^https' || true)
+
+if [[ -n "$DEMO_OTLP_URL" ]]; then
+  echo "OTLP endpoint: $DEMO_OTLP_URL"
+else
+  # Fallback: derive from ES URL  
+  DEMO_OTLP_URL="${DEMO_ES_URL/.es./.ingest.}"
+  DEMO_OTLP_URL=$(echo "$DEMO_OTLP_URL" | sed 's|/$||; s|:[0-9]\{2,5\}$||')
+  DEMO_OTLP_URL="${DEMO_OTLP_URL}:443"
+  echo "OTLP endpoint (fallback derived): $DEMO_OTLP_URL"
+fi
 
 if [[ "$DEMO_HEALTHY" == "true" && -n "$DEMO_KIBANA_URL" && -n "$DEMO_API_KEY" ]]; then
   # Test OTLP endpoint before launching — log the HTTP status so we know if auth works
