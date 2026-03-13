@@ -1508,7 +1508,12 @@ def es_bulk_write(es_url, auth_header, index, docs):
     return n > 0
 
 def probe_es_direct(es_url, api_key):
-    """Try writing a test doc directly to ES; return (auth_header, index) or None."""
+    """Try writing a test doc directly to ES; return (auth_header, index) or None.
+
+    Use paypal-otel-logs (plain index, dynamic mapping, no ingest pipeline) first.
+    The managed logs-apm.otel-default data stream has an APM ingest pipeline that
+    reroutes/drops non-OTel documents while still returning HTTP 200 per item.
+    """
     if not es_url or not api_key:
         return None
     auth = f'ApiKey {api_key}'
@@ -1519,9 +1524,11 @@ def probe_es_direct(es_url, api_key):
         'severity_text': 'INFO',
         'body.text': 'ES-direct probe',
         'trace.id': 'probe000',
+        'merchant.id': 'M-PROBE',
     }
-    # Try managed data stream first, then custom index
-    for index in ('logs-apm.otel-default', 'paypal-logs-default'):
+    # paypal-otel-logs is a plain index — dynamic mapping, no ingest pipeline.
+    # logs-apm.otel-default pipeline drops non-OTel docs while returning HTTP 200.
+    for index in ('paypal-otel-logs', 'paypal-logs-default'):
         n, err = _bulk_write(es_url, auth, index, [test_doc])
         log.info('ES probe [%s]: %s', index, 'OK' if n > 0 else f'FAIL – {err}')
         if n > 0:

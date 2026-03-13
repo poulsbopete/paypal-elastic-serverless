@@ -35,7 +35,7 @@ tabs:
   title: Elastic Serverless
   type: service
   hostname: es3-api
-  path: /app/discover#/?_a=(columns:!(service.name,severity_text,body.text),query:(esql:'FROM+logs-apm.otel-*+%7C+WHERE+%40timestamp+>+NOW()+-+30+minutes+%7C+WHERE+severity_text+%3D%3D+%22ERROR%22+%7C+KEEP+service.name%2C+body.text%2C+severity_text%2C+%40timestamp+%7C+SORT+%40timestamp+DESC+%7C+LIMIT+50',language:esql),sort:!(!('@timestamp',desc)))&_g=(filters:!(),refreshInterval:(pause:!f,value:10000),time:(from:now-30m,to:now))
+  path: /app/discover#/?_a=(columns:!(service.name,severity_text,body.text),query:(esql:'FROM+paypal-otel-logs+%7C+WHERE+%40timestamp+>+NOW()+-+30+minutes+%7C+WHERE+severity_text+%3D%3D+%22ERROR%22+%7C+KEEP+service.name%2C+body.text%2C+severity_text%2C+%40timestamp+%7C+SORT+%40timestamp+DESC+%7C+LIMIT+50',language:esql),sort:!(!('@timestamp',desc)))&_g=(filters:!(),refreshInterval:(pause:!f,value:10000),time:(from:now-30m,to:now))
   port: 8080
   custom_request_headers:
   - key: Content-Security-Policy
@@ -78,7 +78,7 @@ Click the **Elastic Serverless** tab. The error log stream should already be sho
 Run this ES|QL query to see the impact by service:
 
 ```esql
-FROM logs-apm.otel-*
+FROM paypal-otel-logs
 | WHERE @timestamp > NOW() - 5 MINUTES AND severity_text == "ERROR"
 | STATS errors = COUNT(*) BY service.name
 | SORT errors DESC
@@ -93,7 +93,7 @@ Compare the error rates to your pre-fault baseline. You should see a clear spike
 Find which services are seeing the highest error rates during the incident, and what the error messages are:
 
 ```esql
-FROM logs-apm.otel-*
+FROM paypal-otel-logs
 | WHERE @timestamp > NOW() - 5 MINUTES AND severity_text == "ERROR"
 | STATS errors = COUNT(*), unique_traces = COUNT_DISTINCT(trace.id) BY service.name
 | SORT errors DESC
@@ -103,7 +103,7 @@ FROM logs-apm.otel-*
 Drill into the top affected service to see the actual error messages:
 
 ```esql
-FROM logs-apm.otel-*
+FROM paypal-otel-logs
 | WHERE @timestamp > NOW() - 5 MINUTES AND severity_text == "ERROR"
 | KEEP @timestamp, service.name, body.text, trace.id
 | SORT @timestamp DESC

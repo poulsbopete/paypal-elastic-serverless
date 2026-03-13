@@ -65,17 +65,17 @@ notes:
     ES|QL is Elastic's pipe-based query language for high-volume telemetry. One language across logs, metrics, and traces.
 
     ```esql
-    FROM logs-apm.otel-*
+    FROM paypal-otel-logs
     | WHERE merchant.id == "M-98231" AND severity_text == "ERROR"
     | STATS errors = COUNT(*) BY service.name
     | SORT errors DESC
     ```
 
     ```esql
-    FROM metrics-*
+    FROM paypal-otel-logs
     | WHERE @timestamp > NOW() - 15 MINUTES AND service.name == "checkout-service"
-    | STATS p99 = PERCENTILE(transaction.duration, 99) BY merchant.tier, cloud.region
-    | SORT p99 DESC
+    | STATS errors = COUNT(*) BY merchant.id
+    | SORT errors DESC
     ```
 - type: text
   contents: |
@@ -183,7 +183,7 @@ Review the pre-provisioned assets: **Dashboards**, **APM Service Map**, **AI Inv
 In Kibana, open **Discover**, select **ES|QL** as the query language, and run this count query:
 
 ```esql
-FROM logs-apm.otel-*
+FROM paypal-otel-logs
 | STATS services = COUNT_DISTINCT(service.name), log_count = COUNT(*)
 ```
 

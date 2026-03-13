@@ -75,12 +75,12 @@ With live OTLP telemetry flowing from all 7 PayPal microservices, let's demonstr
 
 ## Step 1 — Find Errors Across All Services
 
-Open the **Elastic Serverless** tab → **Discover**. In Discover, select **ES|QL** as the query language (top left). The OTLP data lives in the `logs-apm.otel-default` data stream.
+Open the **Elastic Serverless** tab → **Discover**. In Discover, select **ES|QL** as the query language (top left). The PayPal telemetry lives in the `paypal-otel-logs` index.
 
 First, confirm data is flowing with this count query:
 
 ```esql
-FROM logs-apm.otel-*
+FROM paypal-otel-logs
 | STATS total = COUNT(*), services = COUNT_DISTINCT(service.name)
 ```
 
@@ -91,7 +91,7 @@ You should see a non-zero `total` and `services = 7`.
 Now run this query to see errors by service:
 
 ```esql
-FROM logs-apm.otel-*
+FROM paypal-otel-logs
 | WHERE severity_text == "ERROR"
 | STATS error_count = COUNT(*) BY service.name
 | SORT error_count DESC
@@ -106,7 +106,7 @@ This is the equivalent of a CAL query but with zero specialist syntax — and it
 Pick the service with the highest error count from Step 1 and drill into its recent errors:
 
 ```esql
-FROM logs-apm.otel-*
+FROM paypal-otel-logs
 | WHERE severity_text == "ERROR"
 | STATS errors = COUNT(*), last_seen = MAX(@timestamp) BY service.name
 | SORT errors DESC
@@ -116,7 +116,7 @@ FROM logs-apm.otel-*
 Now drill into the top service to see individual log messages (replace the service name with one from the results above):
 
 ```esql
-FROM logs-apm.otel-*
+FROM paypal-otel-logs
 | WHERE service.name == "payments-orchestrator" AND severity_text == "ERROR"
 | KEEP @timestamp, service.name, severity_text, body.text, trace.id
 | SORT @timestamp DESC
