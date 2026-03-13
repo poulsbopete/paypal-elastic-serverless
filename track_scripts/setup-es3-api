@@ -733,55 +733,98 @@ else
   echo "Participant email resolved: $PARTICIPANT_EMAIL"
 fi
 
-echo "Patching demo app to show only PayPal scenario..."
+echo "Patching demo app for PayPal — display names and incident channels..."
+python3 - <<'PAYPAL_PATCH_EOF'
+import os, re, sys
 
-# 1. Limit scenario registry to fanatics only (safe — no new files, no new imports)
-python3 - <<'PATCH_REGISTRY_EOF'
-import re, sys
-path = "/opt/elastic-launch-demo/scenarios/__init__.py"
+DEMO_DIR = "/opt/elastic-launch-demo"
+
+REPLACEMENTS = [
+    # ── Scenario registry: limit to fanatics only ─────────────────────────────
+    # (applied to __init__.py via regex below, not string replace)
+
+    # ── Scenario display name & description ───────────────────────────────────
+    ("Fanatics Collectibles",       "PayPal Merchant Observability"),
+    ("Fanatics Live",               "PayPal Merchant Observability"),
+    ("fanatics.com",                "paypal.com"),
+    # common description fragments
+    ("Enterprise infrastructure and network operations for vertically integrated trading cards and memorabilia",
+     "Merchant payments platform across 7 microservices on AWS, GCP, and Azure"),
+    ("trading cards and memorabilia", "merchant payments and checkout"),
+    ("Incident Simulator",          "Payment Incident Simulator"),
+
+    # ── Chaos channel names (map Fanatics retail/network → PayPal payments) ───
+    ("MAC Address Flapping",                    "Payment Authorization Timeout"),
+    ("Spanning Tree Topology Change",           "Checkout Session Failure Spike"),
+    ("BGP Peer Flapping",                       "Fraud Decisioning Latency Spike"),
+    ("Firewall Session Table Exhaustion",       "Merchant API Rate Limit Exceeded"),
+    ("Firewall CPU Overload",                   "Settlement Batch Processing Delay"),
+    ("SSL Decryption Certificate Expiry",       "3DS Authentication Service Outage"),
+    ("WiFi AP Disconnect Storm",                "Payment Network Gateway Timeout"),
+    ("WiFi Channel Interference",               "Merchant Webhook Delivery Failure"),
+    ("Client Authentication Storm",             "Currency Conversion Service Error"),
+    ("DNS Resolution Failure Over VPN",         "Recurring Payment Processing Failure"),
+    ("DHCP Lease Storm",                        "Chargeback Processing Queue Backlog"),
+    ("Auction Bid Latency Spike",               "International Transaction Routing Failure"),
+    ("Payment Processing Timeout",              "Mobile SDK Token Refresh Failure"),
+    ("Product Catalog Sync Failure",            "Risk Score Calculation Timeout"),
+    ("Print Queue Overflow",                    "PayPal Wallet Balance Sync Error"),
+    ("Quality Control Rejection Spike",         "Fraud Model Feature Store Timeout"),
+    ("Fulfillment Label Printer Failure",       "Notification Service Queue Backlog"),
+    ("Warehouse Scanner Desync",                "Cross-Region Failover Trigger"),
+    ("Orphaned Cloud Resource Alert",           "Payments Orchestrator Circuit Breaker"),
+    ("Cross-Cloud VPN Tunnel Flapping",         "Gateway Connection Pool Exhaustion"),
+]
+
+# ── Patch scenario registry ────────────────────────────────────────────────────
+init_path = f"{DEMO_DIR}/scenarios/__init__.py"
 try:
-    with open(path) as f:
+    with open(init_path) as f:
         content = f.read()
-    # Replace whatever list is there with just fanatics
     patched = re.sub(
         r'(_scenario_modules\s*=\s*\[)[^\]]*(\])',
         r'\1\n        "scenarios.fanatics.scenario",\n    \2',
-        content,
-        flags=re.DOTALL
+        content, flags=re.DOTALL
     )
-    if patched == content:
-        print("WARN: _scenario_modules pattern not matched — registry unchanged", file=sys.stderr)
-    else:
-        with open(path, "w") as f:
+    if patched != content:
+        with open(init_path, "w") as f:
             f.write(patched)
-        print("Scenario registry limited to fanatics ✓")
+        print("scenarios/__init__.py: registry limited to fanatics ✓")
+    else:
+        print("WARN: _scenario_modules not matched in __init__.py", file=sys.stderr)
 except Exception as e:
-    print(f"WARN: registry patch failed: {e}", file=sys.stderr)
-PATCH_REGISTRY_EOF
+    print(f"WARN: registry patch: {e}", file=sys.stderr)
 
-# 2. Rename all visible "Fanatics" strings → PayPal in scenario.py and templates
-#    Only touches string literals and display text, never class/function/import names
-SCENARIO_PY="$DEMO_DIR/scenarios/fanatics/scenario.py"
-if [[ -f "$SCENARIO_PY" ]]; then
-  perl -i \
-    -pe 's/Fanatics Collectibles/PayPal Merchant Observability/g' \
-    -pe 's/Fanatics Live/PayPal Merchant Observability/g' \
-    -pe 's/Enterprise infrastructure and network operations for vertically integrated trading cards and memorabilia\. Recently migra\.\.\./Merchant payments platform across 7 microservices on AWS, GCP, and Azure./g' \
-    -pe 's/fanatics\.com/paypal\.com/g' \
-    "$SCENARIO_PY" 2>/dev/null || true
-  echo "Scenario display names patched ✓"
-fi
+# ── Patch all text files ───────────────────────────────────────────────────────
+EXTS = {'.py', '.json', '.yaml', '.yml', '.js', '.html', '.jinja', '.jinja2', '.txt'}
+patched_files = []
+for root, dirs, files in os.walk(DEMO_DIR):
+    dirs[:] = [d for d in dirs if d not in ('packages', '.git', '__pycache__', 'node_modules')]
+    for fname in files:
+        if os.path.splitext(fname)[1] not in EXTS:
+            continue
+        fpath = os.path.join(root, fname)
+        try:
+            with open(fpath, 'r', errors='replace') as f:
+                content = f.read()
+            new_content = content
+            for old, new in REPLACEMENTS:
+                new_content = new_content.replace(old, new)
+            if new_content != content:
+                with open(fpath, 'w') as f:
+                    f.write(new_content)
+                patched_files.append(os.path.relpath(fpath, DEMO_DIR))
+        except Exception as e:
+            print(f"WARN: {fpath}: {e}", file=sys.stderr)
 
-# 3. Patch HTML/JS templates — replace any remaining visible "Fanatics" labels
-find "$DEMO_DIR/app" \( -name "*.html" -o -name "*.js" \) 2>/dev/null \
-  | xargs perl -i \
-      -pe 's/Fanatics Collectibles/PayPal Merchant Observability/g' \
-      -pe 's/Fanatics Live/PayPal Merchant Observability/g' \
-      -pe 's/\bFanatics\b/PayPal/g' \
-      2>/dev/null || true
-echo "UI templates patched ✓"
-
-echo "Demo app PayPal-only patch complete ✓"
+if patched_files:
+    print(f"Patched {len(patched_files)} files ✓")
+    for fp in patched_files:
+        print(f"  {fp}")
+else:
+    print("WARN: No files matched — channel definitions may use a different format", file=sys.stderr)
+PAYPAL_PATCH_EOF
+echo "Demo app PayPal patch complete ✓"
 
 echo "Creating systemd service for demo app (port $DEMO_PORT)..."
 cat > /etc/systemd/system/elastic-demo.service <<EOF
