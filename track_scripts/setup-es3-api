@@ -1282,12 +1282,12 @@ print('Config written ✓  basic_auth available:', bool(basic))
 
   cat > /opt/paypal-otel-gen.py <<'OTELGEN_EOF'
 #!/usr/bin/env python3
-"""PayPal OTLP telemetry generator.
+"""PayPal OTLP telemetry generator — stdlib only, no external dependencies.
 Sends realistic PayPal-shaped logs, traces, and metrics to Elastic Serverless.
 Reads credentials from /tmp/paypal-otlp.json written by setup-es3-api."""
 
-import httpx, json, time, random, logging, sys, os, struct, hashlib
-from datetime import datetime, timezone
+import json, time, random, logging, sys, os, hashlib, ssl
+import urllib.request, urllib.error
 
 logging.basicConfig(
     level=logging.INFO,
@@ -1408,53 +1408,47 @@ def make_metrics(svcs):
         })
     return {'resourceMetrics': resource_metrics}
 
-def send(client, url, auth_header, signal, payload):
+_SSL_CTX = ssl.create_default_context()
+
+def _http_post(url, auth_header, data_bytes):
+    """POST data_bytes to url; returns (status_code, body_text)."""
+    req = urllib.request.Request(
+        url, data=data_bytes,
+        headers={'Authorization': auth_header, 'Content-Type': 'application/json'},
+        method='POST')
     try:
-        resp = client.post(
-            f'{url}/v1/{signal}',
-            content=json.dumps(payload).encode(),
-            headers={
-                'Authorization': auth_header,
-                'Content-Type': 'application/json',
-            },
-            timeout=15.0,
-        )
-        if resp.status_code == 200:
-            return True
-        else:
-            log.warning('OTLP %s HTTP %s: %s', signal, resp.status_code, resp.text[:300])
-            return False
+        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=15) as resp:
+            return resp.status, resp.read().decode('utf-8', errors='replace')
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode('utf-8', errors='replace')
     except Exception as e:
-        log.warning('OTLP %s send error: %s', signal, e)
-        return False
+        return 0, str(e)
+
+def send(url, auth_header, signal, payload):
+    data = json.dumps(payload).encode()
+    status, body = _http_post(f'{url}/v1/{signal}', auth_header, data)
+    if status == 200:
+        return True
+    log.warning('OTLP %s HTTP %s: %s', signal, status, body[:300])
+    return False
 
 def probe_auth(url, api_key, basic_auth):
-    """Try ApiKey then Basic auth; return the working auth header or None."""
+    """Try ApiKey then Basic; return the working header or None."""
     test_payload = make_logs(SERVICES[:1], 1)
+    data = json.dumps(test_payload).encode()
     candidates = []
     if api_key:
         candidates.append(('ApiKey', f'ApiKey {api_key}'))
     if basic_auth:
         candidates.append(('Basic', f'Basic {basic_auth}'))
-
-    with httpx.Client(http2=False, verify=True) as client:
-        for label, header in candidates:
-            try:
-                resp = client.post(
-                    f'{url}/v1/logs',
-                    content=json.dumps(test_payload).encode(),
-                    headers={'Authorization': header, 'Content-Type': 'application/json'},
-                    timeout=15.0,
-                )
-                log.info('Auth probe [%s]: HTTP %s', label, resp.status_code)
-                if resp.status_code == 200:
-                    log.info('AUTH OK with %s — data is flowing to Elastic Serverless ✓', label)
-                    return header
-                else:
-                    log.warning('Auth [%s] rejected: %s', label, resp.text[:200])
-            except Exception as e:
-                log.warning('Auth probe [%s] error: %s', label, e)
-    log.error('All auth methods failed. Check ES_URL and credentials.')
+    for label, header in candidates:
+        status, body = _http_post(f'{url}/v1/logs', header, data)
+        log.info('Auth probe [%s]: HTTP %s', label, status)
+        if status == 200:
+            log.info('AUTH OK with %s — data is flowing to Elastic Serverless ✓', label)
+            return header
+        log.warning('Auth [%s] rejected: %s', label, body[:200])
+    log.error('All auth methods failed. Endpoint: %s', url)
     return None
 
 def load_cfg():
@@ -1476,44 +1470,35 @@ def main():
     if not cfg:
         sys.exit(1)
 
-    url       = cfg['otlp_url']
-    api_key   = cfg.get('api_key', '')
+    url        = cfg['otlp_url']
+    api_key    = cfg.get('api_key', '')
     basic_auth = cfg.get('basic_auth', '')
 
     log.info('Starting PayPal OTLP generator → %s', url)
 
-    # Find a working auth method
     auth_header = probe_auth(url, api_key, basic_auth)
     if not auth_header:
-        log.error('Cannot send telemetry — no working auth. Check credentials.')
+        log.error('Cannot send telemetry — no working auth.')
         sys.exit(1)
 
     tick = 0
-    with httpx.Client(http2=False, verify=True) as client:
-        while True:
-            try:
-                # Logs every cycle (~5s)
-                ok = send(client, url, auth_header, 'logs', make_logs(SERVICES, random.randint(2,5)))
+    while True:
+        try:
+            ok = send(url, auth_header, 'logs', make_logs(SERVICES, random.randint(2, 5)))
+            if ok:
+                log.info('Sent logs for %d services (tick %d)', len(SERVICES), tick)
+            if tick % 2 == 0:
+                ok = send(url, auth_header, 'traces', make_traces(SERVICES))
                 if ok:
-                    log.info('Sent logs for %d services (tick %d)', len(SERVICES), tick)
-
-                # Traces every 2 cycles (~10s)
-                if tick % 2 == 0:
-                    ok = send(client, url, auth_header, 'traces', make_traces(SERVICES))
-                    if ok:
-                        log.info('Sent traces ✓')
-
-                # Metrics every 6 cycles (~30s)
-                if tick % 6 == 0:
-                    ok = send(client, url, auth_header, 'metrics', make_metrics(SERVICES))
-                    if ok:
-                        log.info('Sent metrics ✓')
-
-            except Exception as e:
-                log.error('Generator loop error: %s', e)
-
-            tick += 1
-            time.sleep(5)
+                    log.info('Sent traces ✓')
+            if tick % 6 == 0:
+                ok = send(url, auth_header, 'metrics', make_metrics(SERVICES))
+                if ok:
+                    log.info('Sent metrics ✓')
+        except Exception as e:
+            log.error('Generator loop error: %s', e)
+        tick += 1
+        time.sleep(5)
 
 if __name__ == '__main__':
     main()
