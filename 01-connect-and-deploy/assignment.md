@@ -109,7 +109,7 @@ tabs:
   title: Elastic Serverless
   type: service
   hostname: es3-api
-  path: /loading
+  path: /app/dashboards#/list?_g=(filters:!(),refreshInterval:(pause:!f,value:30000),time:(from:now-30m,to:now))
   port: 8080
   custom_request_headers:
   - key: Content-Security-Policy
