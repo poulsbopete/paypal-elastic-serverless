@@ -2237,113 +2237,264 @@ else
   echo "WARN: Skipping Kibana dashboard setup — KIBANA_URL or BASE64 not set"
 fi
 
-# ── SLO Creation for all 7 PayPal services ────────────────────────────────────
-# Create availability and latency SLOs for every service so the Kibana SLOs
-# page shows real status and the AI Agent can answer SLO questions.
+# ── SLO Management Workflow ───────────────────────────────────────────────────
+# Creates an Elastic Workflow that idempotently manages SLOs for all PayPal
+# services. The workflow runs every 24h (and manually), deletes any existing
+# Availability/Latency/Error Rate SLOs, then creates 3 grouped SLOs that
+# automatically produce per-service instances via groupBy: service.name.
+# After creating the workflow, we trigger it immediately to populate SLOs.
 if [[ -n "$KIBANA_URL" && -n "$BASE64" ]]; then
-  echo "Creating PayPal SLOs for all 7 services..."
+  echo "Creating PayPal SLO Management Workflow..."
 
-  python3 - <<SLOS_EOF
-import json, urllib.request, urllib.error, ssl, sys
+  python3 - <<SLO_WF_EOF
+import json, urllib.request, urllib.error, ssl, sys, time
 
 KIBANA = '${KIBANA_URL}'
 AUTH   = 'Basic ${BASE64}'
 CTX    = ssl.create_default_context()
 
-SERVICES = [
-    {'name': 'checkout-service',      'target': 99.5, 'latency_target': 99.0, 'latency_ms': 500},
-    {'name': 'payments-orchestrator', 'target': 99.9, 'latency_target': 99.0, 'latency_ms': 1000},
-    {'name': 'fraud-decisioning',     'target': 99.5, 'latency_target': 99.5, 'latency_ms': 300},
-    {'name': 'merchant-api',          'target': 99.0, 'latency_target': 99.0, 'latency_ms': 200},
-    {'name': 'settlement-service',    'target': 99.0, 'latency_target': 99.0, 'latency_ms': 800},
-    {'name': 'merchant-support-api',  'target': 99.0, 'latency_target': 99.0, 'latency_ms': 400},
-    {'name': 'notification-service',  'target': 99.5, 'latency_target': 99.0, 'latency_ms': 200},
-]
-
-def post_slo(body):
-    data = json.dumps(body).encode()
+def kbn(method, path, body=None):
+    data = json.dumps(body).encode() if body is not None else None
     req  = urllib.request.Request(
-        f'{KIBANA}/api/observability/slos',
-        data=data, method='POST',
+        f'{KIBANA}{path}', data=data, method=method,
         headers={'Authorization': AUTH, 'kbn-xsrf': 'true',
                  'Content-Type': 'application/json'})
     try:
-        with urllib.request.urlopen(req, context=CTX, timeout=20) as r:
+        with urllib.request.urlopen(req, context=CTX, timeout=30) as r:
             return r.status, json.loads(r.read())
     except urllib.error.HTTPError as e:
-        body_txt = e.read().decode('utf-8', 'replace')
-        return e.code, body_txt
+        return e.code, e.read().decode('utf-8','replace')
     except Exception as ex:
         return 0, str(ex)
 
-created = 0
-for svc in SERVICES:
-    sname = svc['name']
-
-    # ── SLO 1: Availability (error rate < threshold) ──────────────────────────
-    avail_body = {
-        'name': f'PayPal {sname} — Availability',
-        'description': f'99%+ of {sname} requests succeed (non-5xx). CAL equivalent: overall transaction success rate.',
-        'indicator': {
-            'type': 'sli.kql.custom',
-            'params': {
-                'index':       'paypal-otel-logs',
-                'timestampField': '@timestamp',
-                'filter':      f'service.name: "{sname}"',
-                'good':        'http.response.status_code < 500',
-                'total':       'service.name: *',
+# ── Workflow definition ───────────────────────────────────────────────────────
+# Adapted from user-supplied template:
+# - index updated to paypal-otel-logs (our actual data index)
+# - filters updated to match ECS fields we generate
+# - groupBy: service.name creates per-service SLO instances automatically
+workflow = {
+    'name': 'SLO Management and Service Evaluation Workflow',
+    'enabled': True,
+    'description': (
+        'Automatically evaluates all services and creates SLOs with relaxed targets. '
+        'Runs every 24 hours. IDEMPOTENT: Deletes all existing SLOs matching '
+        'Availability/Latency/Error Rate names, then creates 3 standard grouped SLOs. '
+        'groupBy: service.name produces one SLO instance per PayPal service automatically. '
+        'SLO Targets: Availability 95%, Error Rate 95%, Latency 85% under 2s.'
+    ),
+    'triggers': [
+        {'type': 'scheduled', 'with': {'every': '24h'}},
+        {'type': 'manual'},
+    ],
+    'steps': [
+        {
+            'name': 'workflow-start',
+            'type': 'console',
+            'with': {'message': (
+                '================================================\n'
+                'PayPal SLO Management Workflow - Starting\n'
+                '================================================\n\n'
+                'Execution ID: {{ execution.id }}\n'
+                'Timestamp: {{ now | date: \'%Y-%m-%d %H:%M:%S UTC\' }}\n\n'
+                'IDEMPOTENT: Deletes existing SLOs, then creates 3 grouped SLOs\n'
+                'that auto-expand to per-service instances via groupBy: service.name\n'
+                '================================================'
+            )},
+        },
+        {
+            'name': 'get-all-existing-slos',
+            'type': 'kibana.request',
+            'on-failure': {'continue': True},
+            'with': {
+                'method': 'GET',
+                'path': '/api/observability/slos?perPage=500',
+                'timeout': '60',
+                'headers': {'Content-Type': 'application/json', 'Accept': 'application/json', 'kbn-xsrf': 'true'},
             },
         },
-        'timeWindow': {'duration': '7d', 'type': 'rolling'},
-        'budgetingMethod': 'occurrences',
-        'objective': {'target': svc['target'] / 100},
-        'settings': {'syncDelay': '1m', 'frequency': '1m'},
-        'tags': ['paypal', 'availability', sname],
-    }
-    status, resp = post_slo(avail_body)
-    if status in (200, 201):
-        created += 1
-        print(f'  SLO created: {sname} availability (target {svc["target"]}%) ✓')
-    elif status == 409:
-        print(f'  SLO exists:  {sname} availability (skipped)')
-    else:
-        print(f'  WARN: {sname} availability SLO HTTP {status}: {str(resp)[:120]}')
-
-    # ── SLO 2: Latency (P99 under threshold) ─────────────────────────────────
-    latency_body = {
-        'name': f'PayPal {sname} — Latency P99',
-        'description': f'P99 latency for {sname} under {svc["latency_ms"]}ms. CAL equivalent: DURATION_MS SLO.',
-        'indicator': {
-            'type': 'sli.kql.custom',
-            'params': {
-                'index':       'paypal-otel-logs',
-                'timestampField': '@timestamp',
-                'filter':      f'service.name: "{sname}"',
-                'good':        f'transaction.duration.us < {svc["latency_ms"] * 1000}',
-                'total':       'service.name: *',
+        {
+            'name': 'loop_over_results',
+            'type': 'foreach',
+            'foreach': '{{steps.get-all-existing-slos.output.results}}',
+            'on-failure': {'continue': True},
+            'steps': [
+                {
+                    'name': 'check_SLOs',
+                    'type': 'if',
+                    'condition': 'foreach.item.name : *Error Rate SLO* OR foreach.item.name : *Latency SLO* OR foreach.item.name : *Availability SLO*',
+                    'steps': [
+                        {
+                            'name': 'print-results',
+                            'type': 'console',
+                            'with': {'message': '{{foreach.item.name | uniq}}: {{foreach.item.id | uniq}}'},
+                        },
+                        {
+                            'name': 'delete-loop-slo',
+                            'type': 'kibana.request',
+                            'on-failure': {'continue': True},
+                            'with': {
+                                'method': 'DELETE',
+                                'path': '/api/observability/slos/{{ foreach.item.id | uniq}}',
+                                'headers': {'kbn-xsrf': 'true'},
+                            },
+                        },
+                    ],
+                    'else': [
+                        {
+                            'name': 'print-else-results',
+                            'type': 'console',
+                            'with': {'message': '{{foreach.item.name | uniq}}: {{foreach.item.id | uniq}}'},
+                        },
+                    ],
+                },
+            ],
+        },
+        {
+            'name': 'create-slo-availability',
+            'type': 'kibana.request',
+            'with': {
+                'method': 'POST',
+                'path': '/api/observability/slos',
+                'body': {
+                    'name': 'Availability SLO',
+                    'description': 'PayPal service availability — 95% of requests succeed (HTTP < 500). Grouped by service.name, producing one instance per PayPal microservice.',
+                    'indicator': {
+                        'type': 'sli.kql.custom',
+                        'params': {
+                            'index': 'paypal-otel-logs',
+                            'timestampField': '@timestamp',
+                            'filter': 'service.name: *',
+                            'good': 'http.response.status_code < 500',
+                            'total': 'service.name: *',
+                        },
+                    },
+                    'groupBy': ['service.name'],
+                    'budgetingMethod': 'occurrences',
+                    'timeWindow': {'duration': '7d', 'type': 'rolling'},
+                    'objective': {'target': 0.95},
+                    'tags': ['paypal', 'availability'],
+                },
+                'headers': {'Content-Type': 'application/json', 'Accept': 'application/json', 'kbn-xsrf': 'true'},
             },
         },
-        'timeWindow': {'duration': '7d', 'type': 'rolling'},
-        'budgetingMethod': 'occurrences',
-        'objective': {'target': svc['latency_target'] / 100},
-        'settings': {'syncDelay': '1m', 'frequency': '1m'},
-        'tags': ['paypal', 'latency', sname],
-    }
-    status, resp = post_slo(latency_body)
-    if status in (200, 201):
-        created += 1
-        print(f'  SLO created: {sname} latency P99 <{svc["latency_ms"]}ms (target {svc["latency_target"]}%) ✓')
-    elif status == 409:
-        print(f'  SLO exists:  {sname} latency (skipped)')
-    else:
-        print(f'  WARN: {sname} latency SLO HTTP {status}: {str(resp)[:120]}')
+        {
+            'name': 'create-slo-latency',
+            'type': 'kibana.request',
+            'with': {
+                'method': 'POST',
+                'path': '/api/observability/slos',
+                'body': {
+                    'name': 'Latency SLO',
+                    'description': 'PayPal service latency — 85% of requests complete in under 2s. Grouped by service.name. CAL DURATION_MS equivalent.',
+                    'indicator': {
+                        'type': 'sli.kql.custom',
+                        'params': {
+                            'index': 'paypal-otel-logs',
+                            'timestampField': '@timestamp',
+                            'filter': 'transaction.duration.us: *',
+                            'good': 'transaction.duration.us <= 2000000',
+                            'total': 'transaction.duration.us: *',
+                        },
+                    },
+                    'groupBy': ['service.name'],
+                    'budgetingMethod': 'occurrences',
+                    'timeWindow': {'duration': '7d', 'type': 'rolling'},
+                    'objective': {'target': 0.85},
+                    'tags': ['paypal', 'latency'],
+                },
+                'headers': {'Content-Type': 'application/json', 'Accept': 'application/json', 'kbn-xsrf': 'true'},
+            },
+        },
+        {
+            'name': 'create-slo-error-rate',
+            'type': 'kibana.request',
+            'with': {
+                'method': 'POST',
+                'path': '/api/observability/slos',
+                'body': {
+                    'name': 'Error Rate SLO',
+                    'description': 'PayPal service error rate — less than 5% of requests fail. Grouped by service.name.',
+                    'indicator': {
+                        'type': 'sli.kql.custom',
+                        'params': {
+                            'index': 'paypal-otel-logs',
+                            'timestampField': '@timestamp',
+                            'filter': 'service.name: *',
+                            'good': 'NOT severity_text: ERROR',
+                            'total': 'service.name: *',
+                        },
+                    },
+                    'groupBy': ['service.name'],
+                    'budgetingMethod': 'occurrences',
+                    'timeWindow': {'duration': '7d', 'type': 'rolling'},
+                    'objective': {'target': 0.95},
+                    'tags': ['paypal', 'error-rate'],
+                },
+                'headers': {'Content-Type': 'application/json', 'Accept': 'application/json', 'kbn-xsrf': 'true'},
+            },
+        },
+    ],
+}
 
-print(f'SLOs created: {created}/14 (2 per service × 7 services)')
-SLOS_EOF
+# ── Create the workflow ───────────────────────────────────────────────────────
+status, resp = kbn('POST', '/api/workflows', workflow)
+if status in (200, 201):
+    wf_id = resp.get('id', '') if isinstance(resp, dict) else ''
+    print(f'Workflow created ✓  id={wf_id}')
 
-  echo "SLO creation done ✓"
+    # Trigger it immediately so SLOs are created right now
+    if wf_id:
+        time.sleep(2)
+        run_status, run_resp = kbn('POST', f'/api/workflows/{wf_id}/run', {})
+        print(f'Workflow triggered: HTTP {run_status}')
+elif status == 409:
+    print('Workflow already exists (409) — skipping creation')
+    # Try to find and trigger the existing one
+    ls_status, ls_resp = kbn('GET', '/api/workflows?perPage=100')
+    if isinstance(ls_resp, dict):
+        for wf in ls_resp.get('results', ls_resp.get('items', [])):
+            if 'SLO Management' in wf.get('name', ''):
+                wf_id = wf.get('id', '')
+                run_status, _ = kbn('POST', f'/api/workflows/{wf_id}/run', {})
+                print(f'Existing workflow triggered: HTTP {run_status}')
+                break
+else:
+    print(f'WARN: Workflow creation HTTP {status}: {str(resp)[:300]}')
+    # Fallback: create SLOs directly via API
+    print('Falling back to direct SLO creation...')
+    for slo in [
+        {'name': 'Availability SLO',
+         'description': 'PayPal service availability — 95% of requests succeed (HTTP < 500)',
+         'indicator': {'type': 'sli.kql.custom', 'params': {
+             'index': 'paypal-otel-logs', 'timestampField': '@timestamp',
+             'filter': 'service.name: *', 'good': 'http.response.status_code < 500', 'total': 'service.name: *'}},
+         'groupBy': ['service.name'], 'budgetingMethod': 'occurrences',
+         'timeWindow': {'duration': '7d', 'type': 'rolling'}, 'objective': {'target': 0.95},
+         'tags': ['paypal', 'availability']},
+        {'name': 'Latency SLO',
+         'description': 'PayPal service latency — 85% of requests under 2s',
+         'indicator': {'type': 'sli.kql.custom', 'params': {
+             'index': 'paypal-otel-logs', 'timestampField': '@timestamp',
+             'filter': 'transaction.duration.us: *', 'good': 'transaction.duration.us <= 2000000', 'total': 'transaction.duration.us: *'}},
+         'groupBy': ['service.name'], 'budgetingMethod': 'occurrences',
+         'timeWindow': {'duration': '7d', 'type': 'rolling'}, 'objective': {'target': 0.85},
+         'tags': ['paypal', 'latency']},
+        {'name': 'Error Rate SLO',
+         'description': 'PayPal service error rate — less than 5% errors',
+         'indicator': {'type': 'sli.kql.custom', 'params': {
+             'index': 'paypal-otel-logs', 'timestampField': '@timestamp',
+             'filter': 'service.name: *', 'good': 'NOT severity_text: ERROR', 'total': 'service.name: *'}},
+         'groupBy': ['service.name'], 'budgetingMethod': 'occurrences',
+         'timeWindow': {'duration': '7d', 'type': 'rolling'}, 'objective': {'target': 0.95},
+         'tags': ['paypal', 'error-rate']},
+    ]:
+        s, r = kbn('POST', '/api/observability/slos', slo)
+        print(f'  SLO "{slo["name"]}": HTTP {s}')
+SLO_WF_EOF
+
+  echo "SLO Management Workflow done ✓"
 else
-  echo "WARN: Skipping SLO creation — KIBANA_URL or BASE64 not set"
+  echo "WARN: Skipping SLO workflow — KIBANA_URL or BASE64 not set"
 fi
 
 echo "Track setup complete — PayPal Merchant Observability environment ready."
