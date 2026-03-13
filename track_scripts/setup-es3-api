@@ -753,6 +753,12 @@ REPLACEMENTS = [
     ("trading cards and memorabilia", "merchant payments and checkout"),
     ("Incident Simulator",          "Payment Incident Simulator"),
 
+    # ── Kibana Workflow names ──────────────────────────────────────────────────
+    ("Fanatics Collectibles Significant Event Notification",    "PayPal Payment Incident Alert & Notification"),
+    ("Fanatics Collectibles Remediation Action",                "PayPal Payment Incident Remediation"),
+    ("Fanatics Collectibles Escalation and Hold Management",    "PayPal Incident Escalation & Hold Management"),
+    ("Fanatics Collectibles Daily Update Report",               "PayPal SRE Daily Health Report"),
+
     # ── Chaos channel names (map Fanatics retail/network → PayPal payments) ───
     ("MAC Address Flapping",                    "Payment Authorization Timeout"),
     ("Spanning Tree Topology Change",           "Checkout Session Failure Spike"),
