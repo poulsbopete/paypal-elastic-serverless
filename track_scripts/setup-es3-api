@@ -1262,53 +1262,43 @@ if [[ -n "$DEMO_OTLP_URL" && -n "$DEMO_API_KEY" ]]; then
   echo "Writing PayPal OTLP generator config..."
   # Include Basic auth credentials as fallback in case ApiKey auth is rejected
   # by the managed ingest endpoint (some Serverless deployments enforce this).
-  _ES_USER=$(jq -r --arg r "$REGIONS" '.[$r].credentials.username // "admin"' /tmp/project_results.json 2>/dev/null || echo "admin")
-  _ES_PASS="${ELASTICSEARCH_PASSWORD:-}"
+  # Read all credentials directly from project_results.json.
+  # Do NOT use `agent variable get` — it requires INSTRUQT_AUTH_TOKEN which
+  # is not available in the systemd service environment.
+  python3 - <<'OTLP_CFG_EOF'
+import json, base64, sys
 
-  # Try to create an APM-specific API key via Kibana.
-  # Regular ES API keys don't have APM write privileges on Serverless.
-  APM_API_KEY=""
-  if [[ -n "$KIBANA_URL" && -n "$DEMO_API_KEY" ]]; then
-    APM_RESP=$(curl -sf -X POST "${KIBANA_URL}/api/apm/agent_keys" \
-      -H "Authorization: ApiKey ${DEMO_API_KEY}" \
-      -H "Content-Type: application/json" \
-      -H "kbn-xsrf: true" \
-      -d '{"name":"paypal-otel-gen","privileges":["event:write","config_agent:read"]}' 2>/dev/null || true)
-    APM_API_KEY=$(echo "$APM_RESP" | python3 -c "
-import sys, json
 try:
-    d = json.load(sys.stdin)
-    # Response may be: {apiKey: {encoded: '...'}} or {key: '...'} depending on version
-    encoded = (d.get('apiKey') or {}).get('encoded') or d.get('encoded') or ''
-    print(encoded)
-except:
-    pass
-" 2>/dev/null || true)
-    if [[ -n "$APM_API_KEY" ]]; then
-      echo "APM API key created via Kibana ✓"
-    else
-      echo "WARN: Could not create APM API key via Kibana — will try ES API key and Basic auth"
-    fi
-  fi
+    with open('/tmp/project_results.json') as f:
+        d = json.load(f)
+    r = next(iter(d.values()))
+    creds     = r.get('credentials', {})
+    endpoints = r.get('endpoints', {})
 
-  python3 -c "
-import json, base64
-es_user  = '${_ES_USER}'
-es_pass  = '${_ES_PASS}'
-basic    = base64.b64encode(f'{es_user}:{es_pass}'.encode()).decode() if es_pass else ''
-cfg = {
-    'otlp_url':   '${DEMO_OTLP_URL}',
-    'apm_key':    '${APM_API_KEY}',
-    'api_key':    '${DEMO_API_KEY}',
-    'basic_auth': basic,
-    'es_url':     '${ES_URL:-}',
-}
-with open('/tmp/paypal-otlp.json', 'w') as f:
-    json.dump(cfg, f)
-print('Config written ✓')
-print('  apm_key:', bool('${APM_API_KEY}'))
-print('  basic_auth:', bool(basic))
-"
+    api_key  = creds.get('api_key', '')   # saved by setup after key creation
+    es_user  = creds.get('username', 'admin')
+    es_pass  = creds.get('password', '')
+    es_url   = endpoints.get('elasticsearch', '')
+    apm_url  = endpoints.get('apm', endpoints.get('ingest', ''))
+    basic    = base64.b64encode(f'{es_user}:{es_pass}'.encode()).decode() if es_pass else ''
+
+    cfg = {
+        'es_url':     es_url,
+        'otlp_url':   apm_url,
+        'api_key':    api_key,
+        'basic_auth': basic,
+    }
+    with open('/tmp/paypal-otlp.json', 'w') as f:
+        json.dump(cfg, f)
+
+    print(f'OTLP config written ✓')
+    print(f'  es_url:   {es_url}')
+    print(f'  otlp_url: {apm_url}')
+    print(f'  api_key:  {api_key[:20]}...' if api_key else '  api_key: MISSING')
+    print(f'  basic:    {"yes" if basic else "no"}')
+except Exception as e:
+    print(f'ERROR writing OTLP config: {e}', file=sys.stderr)
+OTLP_CFG_EOF
 
   cat > /opt/paypal-otel-gen.py <<'OTELGEN_EOF'
 #!/usr/bin/env python3
