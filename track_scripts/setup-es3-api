@@ -2237,4 +2237,113 @@ else
   echo "WARN: Skipping Kibana dashboard setup — KIBANA_URL or BASE64 not set"
 fi
 
+# ── SLO Creation for all 7 PayPal services ────────────────────────────────────
+# Create availability and latency SLOs for every service so the Kibana SLOs
+# page shows real status and the AI Agent can answer SLO questions.
+if [[ -n "$KIBANA_URL" && -n "$BASE64" ]]; then
+  echo "Creating PayPal SLOs for all 7 services..."
+
+  python3 - <<SLOS_EOF
+import json, urllib.request, urllib.error, ssl, sys
+
+KIBANA = '${KIBANA_URL}'
+AUTH   = 'Basic ${BASE64}'
+CTX    = ssl.create_default_context()
+
+SERVICES = [
+    {'name': 'checkout-service',      'target': 99.5, 'latency_target': 99.0, 'latency_ms': 500},
+    {'name': 'payments-orchestrator', 'target': 99.9, 'latency_target': 99.0, 'latency_ms': 1000},
+    {'name': 'fraud-decisioning',     'target': 99.5, 'latency_target': 99.5, 'latency_ms': 300},
+    {'name': 'merchant-api',          'target': 99.0, 'latency_target': 99.0, 'latency_ms': 200},
+    {'name': 'settlement-service',    'target': 99.0, 'latency_target': 99.0, 'latency_ms': 800},
+    {'name': 'merchant-support-api',  'target': 99.0, 'latency_target': 99.0, 'latency_ms': 400},
+    {'name': 'notification-service',  'target': 99.5, 'latency_target': 99.0, 'latency_ms': 200},
+]
+
+def post_slo(body):
+    data = json.dumps(body).encode()
+    req  = urllib.request.Request(
+        f'{KIBANA}/api/observability/slos',
+        data=data, method='POST',
+        headers={'Authorization': AUTH, 'kbn-xsrf': 'true',
+                 'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, context=CTX, timeout=20) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        body_txt = e.read().decode('utf-8', 'replace')
+        return e.code, body_txt
+    except Exception as ex:
+        return 0, str(ex)
+
+created = 0
+for svc in SERVICES:
+    sname = svc['name']
+
+    # ── SLO 1: Availability (error rate < threshold) ──────────────────────────
+    avail_body = {
+        'name': f'PayPal {sname} — Availability',
+        'description': f'99%+ of {sname} requests succeed (non-5xx). CAL equivalent: overall transaction success rate.',
+        'indicator': {
+            'type': 'sli.kql.custom',
+            'params': {
+                'index':       'paypal-otel-logs',
+                'timestampField': '@timestamp',
+                'filter':      f'service.name: "{sname}"',
+                'good':        'http.response.status_code < 500',
+                'total':       'service.name: *',
+            },
+        },
+        'timeWindow': {'duration': '7d', 'type': 'rolling'},
+        'budgetingMethod': 'occurrences',
+        'objective': {'target': svc['target'] / 100},
+        'settings': {'syncDelay': '1m', 'frequency': '1m'},
+        'tags': ['paypal', 'availability', sname],
+    }
+    status, resp = post_slo(avail_body)
+    if status in (200, 201):
+        created += 1
+        print(f'  SLO created: {sname} availability (target {svc["target"]}%) ✓')
+    elif status == 409:
+        print(f'  SLO exists:  {sname} availability (skipped)')
+    else:
+        print(f'  WARN: {sname} availability SLO HTTP {status}: {str(resp)[:120]}')
+
+    # ── SLO 2: Latency (P99 under threshold) ─────────────────────────────────
+    latency_body = {
+        'name': f'PayPal {sname} — Latency P99',
+        'description': f'P99 latency for {sname} under {svc["latency_ms"]}ms. CAL equivalent: DURATION_MS SLO.',
+        'indicator': {
+            'type': 'sli.kql.custom',
+            'params': {
+                'index':       'paypal-otel-logs',
+                'timestampField': '@timestamp',
+                'filter':      f'service.name: "{sname}"',
+                'good':        f'transaction.duration.us < {svc["latency_ms"] * 1000}',
+                'total':       'service.name: *',
+            },
+        },
+        'timeWindow': {'duration': '7d', 'type': 'rolling'},
+        'budgetingMethod': 'occurrences',
+        'objective': {'target': svc['latency_target'] / 100},
+        'settings': {'syncDelay': '1m', 'frequency': '1m'},
+        'tags': ['paypal', 'latency', sname],
+    }
+    status, resp = post_slo(latency_body)
+    if status in (200, 201):
+        created += 1
+        print(f'  SLO created: {sname} latency P99 <{svc["latency_ms"]}ms (target {svc["latency_target"]}%) ✓')
+    elif status == 409:
+        print(f'  SLO exists:  {sname} latency (skipped)')
+    else:
+        print(f'  WARN: {sname} latency SLO HTTP {status}: {str(resp)[:120]}')
+
+print(f'SLOs created: {created}/14 (2 per service × 7 services)')
+SLOS_EOF
+
+  echo "SLO creation done ✓"
+else
+  echo "WARN: Skipping SLO creation — KIBANA_URL or BASE64 not set"
+fi
+
 echo "Track setup complete — PayPal Merchant Observability environment ready."
