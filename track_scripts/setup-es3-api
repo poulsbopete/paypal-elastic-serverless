@@ -733,79 +733,8 @@ else
   echo "Participant email resolved: $PARTICIPANT_EMAIL"
 fi
 
-echo "Patching demo app for PayPal-only scenario..."
-mkdir -p "$DEMO_DIR/scenarios/paypal"
-touch "$DEMO_DIR/scenarios/paypal/__init__.py"
-cat > "$DEMO_DIR/scenarios/paypal/scenario.py" << 'PAYPAL_EOF'
-from __future__ import annotations
-from typing import Any
-from scenarios.base import UITheme
-from scenarios.fanatics.scenario import FanaticsScenario
-
-class PayPalScenario(FanaticsScenario):
-    @property
-    def scenario_id(self) -> str: return "paypal"
-    @property
-    def scenario_name(self) -> str: return "PayPal Merchant Observability"
-    @property
-    def scenario_description(self) -> str:
-        return "Merchant payments platform across 7 microservices on AWS, GCP, and Azure."
-    @property
-    def namespace(self) -> str: return "paypal"
-    @property
-    def theme(self) -> UITheme:
-        return UITheme(
-            bg_primary="#080d1a", bg_secondary="#0d1529", bg_tertiary="#162040",
-            accent_primary="#0070ba", accent_secondary="#003087",
-            text_primary="#e6edf3", text_secondary="#8b9ab0", text_accent="#0070ba",
-            status_nominal="#3fb950", status_warning="#d29922", status_critical="#f85149", status_info="#0070ba",
-            font_family="'Inter','Segoe UI',system-ui,sans-serif", font_mono="'JetBrains Mono','Fira Code',monospace",
-            font_size_base="14px", scanline_effect=False, glow_effect=False, grid_background=False,
-            gradient_accent="linear-gradient(135deg,#003087 0%,#0070ba 100%)",
-            dashboard_title="PayPal Merchant Operations", chaos_title="Payment Incident Simulator",
-            landing_title="PayPal Observability Center", service_label="Service", channel_label="Incident",
-        )
-    @property
-    def services(self) -> dict[str, dict[str, Any]]:
-        return {
-            "merchant-api": {"cloud_provider":"aws","cloud_region":"us-east-1","cloud_platform":"aws_ec2","cloud_availability_zone":"us-east-1a","subsystem":"merchant_management","language":"java"},
-            "checkout-service": {"cloud_provider":"aws","cloud_region":"us-east-1","cloud_platform":"aws_ec2","cloud_availability_zone":"us-east-1b","subsystem":"checkout","language":"python"},
-            "payments-orchestrator": {"cloud_provider":"aws","cloud_region":"us-east-1","cloud_platform":"aws_ec2","cloud_availability_zone":"us-east-1c","subsystem":"payments","language":"go"},
-            "fraud-decisioning": {"cloud_provider":"gcp","cloud_region":"us-central1","cloud_platform":"gcp_compute_engine","cloud_availability_zone":"us-central1-a","subsystem":"risk","language":"python"},
-            "settlement-service": {"cloud_provider":"gcp","cloud_region":"us-central1","cloud_platform":"gcp_compute_engine","cloud_availability_zone":"us-central1-b","subsystem":"settlement","language":"python","generates_traces":False},
-            "merchant-support-api": {"cloud_provider":"azure","cloud_region":"eastus","cloud_platform":"azure_vm","cloud_availability_zone":"eastus-1","subsystem":"support","language":"go","generates_traces":False},
-            "notification-service": {"cloud_provider":"azure","cloud_region":"eastus","cloud_platform":"azure_vm","cloud_availability_zone":"eastus-2","subsystem":"notifications","language":"java","generates_traces":False},
-        }
-
-scenario = PayPalScenario()
-PAYPAL_EOF
-
-python3 - << 'PATCH_INIT_EOF'
-import re, sys
-path = "/opt/elastic-launch-demo/scenarios/__init__.py"
-try:
-    with open(path) as f: content = f.read()
-    new_list = '    _scenario_modules = [\n        "scenarios.paypal.scenario",\n    ]'
-    content = re.sub(r'    _scenario_modules = \[.*?\]', new_list, content, flags=re.DOTALL)
-    with open(path, "w") as f: f.write(content)
-    print("Patched scenarios/__init__.py — PayPal only")
-except Exception as e:
-    print(f"WARN: patch failed: {e}", file=sys.stderr)
-PATCH_INIT_EOF
-
-python3 - << 'PATCH_ICON_EOF'
-import sys
-path = "/opt/elastic-launch-demo/app/selector/static/index.html"
-try:
-    with open(path) as f: content = f.read()
-    content = content.replace("const SCENARIO_ICONS = {", "const SCENARIO_ICONS = {\n        paypal: '\U0001f4b3',")
-    with open(path, "w") as f: f.write(content)
-    print("Patched selector — PayPal icon added")
-except Exception as e:
-    print(f"WARN: icon patch failed: {e}", file=sys.stderr)
-PATCH_ICON_EOF
-
-echo "Demo app patched for PayPal ✓"
+# Demo app runs the fanatics scenario (identical telemetry stack).
+# PayPal branding is in the Instruqt challenge content; no app-level patching needed.
 
 echo "Creating systemd service for demo app (port $DEMO_PORT)..."
 cat > /etc/systemd/system/elastic-demo.service <<EOF
@@ -863,49 +792,27 @@ done
 DEMO_KIBANA_URL="${KIBANA_URL:-}"
 DEMO_API_KEY="${ELASTICSEARCH_API_KEY:-}"
 
-SCENARIO_LAUNCHED=false
-
 if [[ "$DEMO_HEALTHY" == "true" && -n "$DEMO_KIBANA_URL" && -n "$DEMO_API_KEY" ]]; then
-  echo "Launching PayPal scenario against $DEMO_KIBANA_URL ..."
+  echo "Launching fanatics scenario against $DEMO_KIBANA_URL ..."
 
-  PAYPAL_LAUNCH=$(curl -sf -X POST "http://localhost:${DEMO_PORT}/api/setup/launch" \
+  curl -sf -X POST "http://localhost:${DEMO_PORT}/api/setup/launch" \
     -H 'Content-Type: application/json' \
-    -d "{\"scenario_id\":\"paypal\",\"kibana_url\":\"${DEMO_KIBANA_URL}\",\"api_key\":\"${DEMO_API_KEY}\"}" \
-    2>/dev/null || echo "FAILED")
+    -d "{\"scenario_id\":\"fanatics\",\"kibana_url\":\"${DEMO_KIBANA_URL}\",\"api_key\":\"${DEMO_API_KEY}\"}" \
+    >/dev/null 2>&1 || echo "WARN: Launch request failed — learners can launch manually via the Demo App tab."
 
-  if echo "$PAYPAL_LAUNCH" | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if d.get('ok') or d.get('deployment_id') else 1)" 2>/dev/null; then
-    echo "PayPal scenario launched ✓"
-    SCENARIO_LAUNCHED=true
-  else
-    echo "Falling back to fanatics scenario..."
-    FANATICS_LAUNCH=$(curl -sf -X POST "http://localhost:${DEMO_PORT}/api/setup/launch" \
-      -H 'Content-Type: application/json' \
-      -d "{\"scenario_id\":\"fanatics\",\"kibana_url\":\"${DEMO_KIBANA_URL}\",\"api_key\":\"${DEMO_API_KEY}\"}" \
-      2>/dev/null || echo "FAILED")
-    if [[ "$FANATICS_LAUNCH" != "FAILED" ]]; then
-      SCENARIO_LAUNCHED=true
-    else
-      echo "WARN: All launch attempts failed — learners can launch manually via the Demo App tab."
+  echo "Waiting for deployment to register..."
+  for i in $(seq 1 60); do
+    RUNNING="$(curl -sf "http://localhost:${DEMO_PORT}/api/deployments" 2>/dev/null \
+      | python3 -c "import sys,json; deps=json.load(sys.stdin); print(sum(1 for d in deps if d.get('running')))" 2>/dev/null || echo 0)"
+    if [[ "$RUNNING" -ge 1 ]]; then
+      echo "Deployment active after $((i*2))s ✓"
+      break
     fi
-  fi
-
-  if [[ "$SCENARIO_LAUNCHED" == "true" ]]; then
-    echo "Waiting for deployment to register..."
-    for i in $(seq 1 60); do
-      RUNNING="$(curl -sf "http://localhost:${DEMO_PORT}/api/deployments" 2>/dev/null \
-        | python3 -c "import sys,json; deps=json.load(sys.stdin); print(sum(1 for d in deps if d.get('running')))" 2>/dev/null || echo 0)"
-      if [[ "$RUNNING" -ge 1 ]]; then
-        echo "Deployment active after $((i*2))s ✓"
-        break
-      fi
-      if [[ $i -eq 60 ]]; then
-        echo "WARN: Deployment did not register after 120s — learners can launch manually."
-      fi
-      sleep 2
-    done
-  else
-    echo "Skipping deployment wait — no scenario was launched."
-  fi
+    if [[ $i -eq 60 ]]; then
+      echo "WARN: Deployment did not register after 120s — learners can launch manually."
+    fi
+    sleep 2
+  done
 elif [[ "$DEMO_HEALTHY" != "true" ]]; then
   echo "WARN: Skipping scenario launch — demo app never became healthy."
 else
