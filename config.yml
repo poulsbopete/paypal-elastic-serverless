@@ -7,12 +7,12 @@ virtualmachines:
     PRODUCT_TIER: complete
     PROJECT_TYPE: observability
     REGIONS: aws-us-east-1
-  secrets:
-  - name: ESS_CLOUD_API_KEY
-  - name: LLM_PROXY_PROD
   memory: 12288
   cpus: 4
   allow_external_ingress:
   - http
   - https
   - high-ports
+secrets:
+- name: LLM_PROXY_PROD
+- name: ESS_CLOUD_API_KEY

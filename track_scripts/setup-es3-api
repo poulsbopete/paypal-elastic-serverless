@@ -837,13 +837,23 @@ systemctl enable elastic-demo
 systemctl start  elastic-demo
 
 echo "Waiting for demo app to become healthy on port $DEMO_PORT..."
-for i in $(seq 1 60); do
+DEMO_HEALTHY=false
+for i in $(seq 1 180); do
   if curl -sf "http://localhost:${DEMO_PORT}/health" >/dev/null 2>&1; then
     echo "Demo app healthy after ${i}s ✓"
+    DEMO_HEALTHY=true
     break
   fi
-  if [[ $i -eq 60 ]]; then
-    echo "WARN: Demo app did not become healthy after 60s"
+  if [[ $i -eq 30 ]]; then
+    echo "Still waiting for demo app... (${i}s)"
+    systemctl is-active --quiet elastic-demo || {
+      echo "WARN: elastic-demo service is not active at ${i}s — last 20 log lines:"
+      journalctl -u elastic-demo --no-pager -n 20 || true
+    }
+  fi
+  if [[ $i -eq 180 ]]; then
+    echo "WARN: Demo app did not become healthy after 180s — last 30 log lines:"
+    journalctl -u elastic-demo --no-pager -n 30 || true
   fi
   sleep 1
 done
@@ -853,7 +863,9 @@ done
 DEMO_KIBANA_URL="${KIBANA_URL:-}"
 DEMO_API_KEY="${ELASTICSEARCH_API_KEY:-}"
 
-if [[ -n "$DEMO_KIBANA_URL" && -n "$DEMO_API_KEY" ]]; then
+SCENARIO_LAUNCHED=false
+
+if [[ "$DEMO_HEALTHY" == "true" && -n "$DEMO_KIBANA_URL" && -n "$DEMO_API_KEY" ]]; then
   echo "Launching PayPal scenario against $DEMO_KIBANA_URL ..."
 
   PAYPAL_LAUNCH=$(curl -sf -X POST "http://localhost:${DEMO_PORT}/api/setup/launch" \
@@ -863,27 +875,39 @@ if [[ -n "$DEMO_KIBANA_URL" && -n "$DEMO_API_KEY" ]]; then
 
   if echo "$PAYPAL_LAUNCH" | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if d.get('ok') or d.get('deployment_id') else 1)" 2>/dev/null; then
     echo "PayPal scenario launched ✓"
+    SCENARIO_LAUNCHED=true
   else
     echo "Falling back to fanatics scenario..."
-    curl -sf -X POST "http://localhost:${DEMO_PORT}/api/setup/launch" \
+    FANATICS_LAUNCH=$(curl -sf -X POST "http://localhost:${DEMO_PORT}/api/setup/launch" \
       -H 'Content-Type: application/json' \
       -d "{\"scenario_id\":\"fanatics\",\"kibana_url\":\"${DEMO_KIBANA_URL}\",\"api_key\":\"${DEMO_API_KEY}\"}" \
-      >/dev/null 2>&1 || echo "WARN: Launch request failed — learners can launch manually via the Demo App tab."
+      2>/dev/null || echo "FAILED")
+    if [[ "$FANATICS_LAUNCH" != "FAILED" ]]; then
+      SCENARIO_LAUNCHED=true
+    else
+      echo "WARN: All launch attempts failed — learners can launch manually via the Demo App tab."
+    fi
   fi
 
-  echo "Waiting for deployment to register..."
-  for i in $(seq 1 120); do
-    RUNNING="$(curl -sf "http://localhost:${DEMO_PORT}/api/deployments" 2>/dev/null \
-      | python3 -c "import sys,json; deps=json.load(sys.stdin); print(sum(1 for d in deps if d.get('running')))" 2>/dev/null || echo 0)"
-    if [[ "$RUNNING" -ge 1 ]]; then
-      echo "Deployment active after ${i}s ✓"
-      break
-    fi
-    if [[ $i -eq 120 ]]; then
-      echo "WARN: Deployment did not register after 240s"
-    fi
-    sleep 2
-  done
+  if [[ "$SCENARIO_LAUNCHED" == "true" ]]; then
+    echo "Waiting for deployment to register..."
+    for i in $(seq 1 60); do
+      RUNNING="$(curl -sf "http://localhost:${DEMO_PORT}/api/deployments" 2>/dev/null \
+        | python3 -c "import sys,json; deps=json.load(sys.stdin); print(sum(1 for d in deps if d.get('running')))" 2>/dev/null || echo 0)"
+      if [[ "$RUNNING" -ge 1 ]]; then
+        echo "Deployment active after $((i*2))s ✓"
+        break
+      fi
+      if [[ $i -eq 60 ]]; then
+        echo "WARN: Deployment did not register after 120s — learners can launch manually."
+      fi
+      sleep 2
+    done
+  else
+    echo "Skipping deployment wait — no scenario was launched."
+  fi
+elif [[ "$DEMO_HEALTHY" != "true" ]]; then
+  echo "WARN: Skipping scenario launch — demo app never became healthy."
 else
   echo "WARN: Missing Kibana URL or API key — skipping auto-launch."
 fi
