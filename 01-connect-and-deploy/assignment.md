@@ -95,10 +95,6 @@ notes:
 
     All 7 services emit **logs, metrics, and traces** via OTLP to your Elastic Serverless Observability project.
 tabs:
-- id: daaqdhx9pa0f
-  title: Why Elastic
-  type: website
-  url: https://rawcdn.githack.com/poulsbopete/paypal-elastic-serverless/7aae6c6512764d745f82457824398ed29c88daf6/docs/splash.html
 - id: ufdoduoqc9ok
   title: Terminal
   type: terminal
@@ -134,27 +130,37 @@ enhanced_loading: null
 
 Your Elastic Cloud Serverless Observability project was **automatically provisioned** when this lab started. Open the **Elastic Serverless** tab — no login required.
 
-The PayPal merchant demo environment is already running on this VM and has been pre-configured with your project's credentials.
+The PayPal merchant demo environment is running on this VM and has been pre-configured with your project's credentials.
 
 ---
 
-## Step 1 — Verify the Demo Environment is Running
+## Step 1 — Verify the Demo App is Healthy
 
-Open the **Terminal** tab and confirm all services are healthy:
+Open the **Terminal** tab and check whether the demo app is running:
 
 ```bash
-demo-deployments
+curl http://localhost:8090/health
 ```
 
-You should see the PayPal scenario listed as active. You can also check demo app health directly:
+You should see `{"status":"ok"}`. If not, check the service log:
 
 ```bash
-curl -sf http://localhost:8090/health
+journalctl -u elastic-demo --no-pager -n 30
 ```
 
 ---
 
-## Step 2 — Explore the Demo App
+## Step 2 — Check Active Deployments
+
+```bash
+curl -s http://localhost:8090/api/deployments | python3 -m json.tool
+```
+
+You should see the PayPal scenario listed with `"running": true`. If the list is empty, the scenario is still initializing — wait 30 seconds and retry.
+
+---
+
+## Step 3 — Explore the Demo App
 
 Click the **Demo App** tab. This is your control panel for the lab:
 
@@ -164,17 +170,17 @@ Click the **Demo App** tab. This is your control panel for the lab:
 
 ---
 
-## Step 3 — Open Elastic Serverless
+## Step 4 — Open Elastic Serverless
 
-Click the **Elastic Serverless** tab. You'll first see the **PayPal Observability** welcome page — click **Open Kibana Dashboards** to go to Kibana.
+Click the **Elastic Serverless** tab to open Kibana. No login required — authentication is handled automatically via the NGINX proxy.
 
-Review the auto-provisioned assets: dashboards, AI Investigation Agent, ES|QL alert rules, and Elastic Workflows.
+Review the pre-provisioned assets: **Dashboards**, **APM Service Map**, **AI Investigation Agent**, and **Alert Rules**.
 
 ---
 
-## Step 4 — Verify Live Telemetry
+## Step 5 — Verify Live Telemetry
 
-In Kibana, open **Discover** and switch to the `logs.otel` data view. You should see logs flowing from all 7 services with `merchant.id`, `service.name`, and `trace.id` fields populated.
+In Kibana, open **Discover** and select the `logs.otel` data view. You should see logs flowing from all 7 services with `merchant.id`, `service.name`, and `trace.id` fields populated.
 
 Run this ES|QL query to confirm:
 

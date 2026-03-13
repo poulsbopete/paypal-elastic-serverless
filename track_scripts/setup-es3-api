@@ -912,16 +912,41 @@ else
   echo "WARN: Missing Kibana URL or API key — skipping auto-launch."
 fi
 
-# Convenience aliases
-cat >> /root/.bashrc <<'BASH'
+# Create real executables in /usr/local/bin so they work in Instruqt terminal tabs
+# (terminal tabs don't source .bashrc, so aliases defined there are invisible)
+cat > /usr/local/bin/demo-logs <<'EOF'
+#!/bin/bash
+journalctl -u elastic-demo -f --no-pager
+EOF
 
-# PayPal Merchant Observability — demo aliases
-alias demo-logs="journalctl -u elastic-demo -f --no-pager"
-alias demo-status="curl -sf http://localhost:8090/api/status | python3 -m json.tool"
-alias demo-deployments="curl -sf http://localhost:8090/api/deployments | python3 -m json.tool"
-alias demo-chaos="curl -sf http://localhost:8090/api/chaos/status | python3 -m json.tool"
-alias demo-restart="systemctl restart elastic-demo && sleep 3 && curl -sf http://localhost:8090/health"
-alias merchant-logs='curl -sf http://localhost:8090/api/status | python3 -m json.tool'
-BASH
+cat > /usr/local/bin/demo-status <<'EOF'
+#!/bin/bash
+curl -s http://localhost:8090/api/status | python3 -m json.tool
+EOF
+
+cat > /usr/local/bin/demo-deployments <<'EOF'
+#!/bin/bash
+curl -s http://localhost:8090/api/deployments | python3 -m json.tool
+EOF
+
+cat > /usr/local/bin/demo-chaos <<'EOF'
+#!/bin/bash
+curl -s http://localhost:8090/api/chaos/status | python3 -m json.tool
+EOF
+
+cat > /usr/local/bin/demo-restart <<'EOF'
+#!/bin/bash
+systemctl restart elastic-demo
+sleep 3
+curl -s http://localhost:8090/health
+EOF
+
+chmod +x /usr/local/bin/demo-logs \
+         /usr/local/bin/demo-status \
+         /usr/local/bin/demo-deployments \
+         /usr/local/bin/demo-chaos \
+         /usr/local/bin/demo-restart
+
+echo "Demo helper commands installed in /usr/local/bin ✓"
 
 echo "Track setup complete — PayPal Merchant Observability environment ready."
