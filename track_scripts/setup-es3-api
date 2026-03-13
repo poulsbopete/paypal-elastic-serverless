@@ -1552,15 +1552,37 @@ def probe_es_direct(es_url, api_key):
             return auth, index
     return None
 
+TRANSACTION_NAMES = {
+    'checkout-service':      ['POST /api/checkout/initiate','POST /api/checkout/confirm','GET /api/checkout/status'],
+    'payments-orchestrator': ['POST /api/payments/authorize','POST /api/payments/capture','POST /api/payments/void'],
+    'fraud-decisioning':     ['POST /api/fraud/score','POST /api/fraud/review','GET /api/fraud/rules'],
+    'merchant-api':          ['GET /api/merchant/profile','PUT /api/merchant/settings','POST /api/merchant/verify'],
+    'settlement-service':    ['POST /api/settlement/batch','GET /api/settlement/status','POST /api/settlement/reconcile'],
+    'merchant-support-api':  ['POST /api/support/ticket','GET /api/support/case','PUT /api/support/escalate'],
+    'notification-service':  ['POST /api/notify/email','POST /api/notify/push','POST /api/notify/webhook'],
+}
+# P99 latency baseline per service (ms) — used to generate realistic durations
+SVC_LATENCY_MS = {
+    'checkout-service': 145, 'payments-orchestrator': 320, 'fraud-decisioning': 85,
+    'merchant-api': 45, 'settlement-service': 210, 'merchant-support-api': 60,
+    'notification-service': 30,
+}
+
 def make_es_log_docs(svcs, n_per_svc=3):
-    """Generate ECS-compatible log docs for ES _bulk API."""
+    """Generate PayPal-shaped telemetry docs for ES _bulk API.
+    Each doc includes log, trace, and RED metric fields for rich ES|QL queries."""
     from datetime import datetime, timezone
     docs = []
     for svc in svcs:
         msgs = LOG_MESSAGES.get(svc['name'], ['Processing request'])
+        base_ms = SVC_LATENCY_MS.get(svc['name'], 100)
+        txn_names = TRANSACTION_NAMES.get(svc['name'], ['GET /api/request'])
         for _ in range(n_per_svc):
             is_error = random.random() < 0.12
             msg = random.choice(msgs[3:] if is_error and len(msgs) > 3 else msgs[:3])
+            # Latency: normal distribution around baseline, spikes on errors
+            duration_ms = max(5, int(random.gauss(base_ms * (4 if is_error else 1), base_ms * 0.3)))
+            http_status = random.choice([500, 503, 504]) if is_error else random.choice([200, 200, 200, 201, 202])
             docs.append({
                 '@timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
                 'service.name': svc['name'],
@@ -1569,9 +1591,15 @@ def make_es_log_docs(svcs, n_per_svc=3):
                 'deployment.environment': 'production',
                 'severity_text': 'ERROR' if is_error else random.choice(['INFO','INFO','WARN']),
                 'body.text': msg,
-                'trace.id': _rand_id(16),
-                'span.id': _rand_id(8),
+                'trace.id': _rand_id(32),
+                'span.id': _rand_id(16),
+                'transaction.id': _rand_id(16),
+                'transaction.name': random.choice(txn_names),
+                'transaction.duration.us': duration_ms * 1000,
+                'http.response.status_code': http_status,
                 'merchant.id': f'M-{random.randint(10000,99999)}',
+                'merchant.tier': random.choice(['enterprise','business','standard']),
+                'payment.method': random.choice(['card','paypal_balance','bank','bnpl']),
             })
     return docs
 
@@ -2008,5 +2036,205 @@ echo "  demo-otlp-errors   — show recent OTLP errors in app logs"
 echo "  demo-deployments   — show running scenarios"
 echo "  demo-chaos         — show chaos channel status"
 echo "  demo-restart       — restart the demo app"
+
+# ── Kibana Data View + Dashboard for paypal-otel-logs ────────────────────────
+# Create a data view and a working dashboard so the Elastic Serverless tab
+# shows real PayPal data instead of the broken Fanatics APM dashboard.
+if [[ -n "$KIBANA_URL" && -n "$BASE64" ]]; then
+  echo "Creating Kibana data view and dashboard for paypal-otel-logs..."
+  sleep 10  # Allow generator to index at least a few docs first
+
+  python3 - <<KIBANA_DASH_EOF
+import json, urllib.request, urllib.error, ssl, uuid, sys
+
+KIBANA = '${KIBANA_URL}'
+AUTH   = 'Basic ${BASE64}'
+CTX    = ssl.create_default_context()
+
+def kbn(method, path, body=None):
+    url = f'{KIBANA}{path}'
+    data = json.dumps(body).encode() if body else None
+    req  = urllib.request.Request(url, data=data, method=method,
+        headers={'Authorization': AUTH, 'kbn-xsrf': 'true',
+                 'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, context=CTX, timeout=20) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, {}
+    except Exception as ex:
+        return 0, {'error': str(ex)}
+
+# 1. Create data view for paypal-otel-*
+status, resp = kbn('POST', '/api/data_views/data_view', {
+    'data_view': {
+        'title': 'paypal-otel-*',
+        'timeFieldName': '@timestamp',
+        'name': 'PayPal OTel Telemetry',
+    }
+})
+if status in (200, 409):  # 409 = already exists
+    dv_id = resp.get('data_view', {}).get('id', 'paypal-otel-')
+    print(f'Data view: HTTP {status} id={dv_id}')
+else:
+    print(f'WARN: data view HTTP {status}')
+    dv_id = 'paypal-otel-'
+
+# 2. Build dashboard NDJSON and import it
+layer1 = str(uuid.uuid4())
+layer2 = str(uuid.uuid4())
+layer3 = str(uuid.uuid4())
+viz1   = str(uuid.uuid4())
+viz2   = str(uuid.uuid4())
+viz3   = str(uuid.uuid4())
+viz4   = str(uuid.uuid4())
+dash   = str(uuid.uuid4())
+
+def lens_esql(title, esql_query, viz_type, layer_id, columns):
+    """Build a minimal Lens saved object using ES|QL (textBased datasource)."""
+    return {
+        'type': 'lens', 'id': str(uuid.uuid4()),
+        'attributes': {
+            'title': title,
+            'visualizationType': viz_type,
+            'state': {
+                'datasourceStates': {
+                    'textBased': {
+                        'layers': {
+                            layer_id: {
+                                'index': '', 'query': {'esql': esql_query},
+                                'columns': columns, 'allColumns': columns,
+                                'timeField': '@timestamp',
+                            }
+                        }
+                    }
+                },
+                'visualization': _viz_config(viz_type, layer_id, columns),
+                'query': {'query': '', 'language': 'kuery'},
+                'filters': [], 'internalReferences': [], 'adHocDataViews': {},
+            }
+        },
+        'references': [],
+    }
+
+def _viz_config(viz_type, layer_id, columns):
+    if viz_type == 'lnsDatatable':
+        return {
+            'layerId': layer_id, 'layerType': 'data',
+            'columns': [{'columnId': c['columnId'], 'isTransposed': False} for c in columns],
+        }
+    if viz_type == 'lnsXY':
+        cat = columns[0]['columnId']
+        val = columns[1]['columnId']
+        return {
+            'legend': {'isVisible': True, 'position': 'right'},
+            'valueLabels': 'inside',
+            'layers': [{
+                'layerId': layer_id, 'layerType': 'data',
+                'seriesType': 'bar_horizontal',
+                'xAccessor': val, 'splitAccessor': None,
+                'accessors': [val], 'yConfig': [],
+            }],
+            'yTitle': '', 'xTitle': '',
+        }
+    if viz_type == 'lnsMetric':
+        return {
+            'layerId': layer_id, 'layerType': 'data',
+            'metricAccessor': columns[0]['columnId'],
+        }
+    return {}
+
+def col(cid, field, ftype):
+    return {'columnId': cid, 'fieldName': field, 'meta': {'type': ftype}}
+
+# Lens visualizations
+v1 = lens_esql(
+    'Errors by Service (Last Hour)',
+    "FROM paypal-otel-logs | WHERE @timestamp > NOW() - 1 hours AND severity_text == \"ERROR\" | STATS errors = COUNT(*) BY service.name | SORT errors DESC | LIMIT 10",
+    'lnsXY', str(uuid.uuid4()),
+    [col('c1','service.name','string'), col('c2','errors','number')],
+)
+v2 = lens_esql(
+    'Log Volume by Service',
+    "FROM paypal-otel-logs | WHERE @timestamp > NOW() - 1 hours | STATS total = COUNT(*), errors = COUNT(*) BY service.name | SORT total DESC | LIMIT 10",
+    'lnsDatatable', str(uuid.uuid4()),
+    [col('c1','service.name','string'), col('c2','total','number'), col('c3','errors','number')],
+)
+v3 = lens_esql(
+    'P99 Latency by Service (ms)',
+    "FROM paypal-otel-logs | WHERE @timestamp > NOW() - 1 hours | EVAL duration_ms = transaction.duration.us / 1000 | STATS p99_ms = MAX(duration_ms) BY service.name | SORT p99_ms DESC | LIMIT 10",
+    'lnsXY', str(uuid.uuid4()),
+    [col('c1','service.name','string'), col('c2','p99_ms','number')],
+)
+v4 = lens_esql(
+    'Error Rate by Service (%)',
+    "FROM paypal-otel-logs | WHERE @timestamp > NOW() - 1 hours | STATS total = COUNT(*), errors = COUNT(*) BY service.name | EVAL error_pct = ROUND(errors * 100.0 / total, 1) | KEEP service.name, total, errors, error_pct | SORT error_pct DESC | LIMIT 10",
+    'lnsDatatable', str(uuid.uuid4()),
+    [col('c1','service.name','string'), col('c2','total','number'), col('c3','errors','number'), col('c4','error_pct','number')],
+)
+
+# Dashboard panels layout (2×2 grid)
+panels = json.dumps([
+    {'type':'lens','gridData':{'x':0,'y':0,'w':24,'h':15,'i':'p1'},'panelIndex':'p1','embeddableConfig':{'attributes':v1['attributes'],'enhancements':{}},'title':'Errors by Service'},
+    {'type':'lens','gridData':{'x':24,'y':0,'w':24,'h':15,'i':'p2'},'panelIndex':'p2','embeddableConfig':{'attributes':v2['attributes'],'enhancements':{}},'title':'Log Volume'},
+    {'type':'lens','gridData':{'x':0,'y':15,'w':24,'h':15,'i':'p3'},'panelIndex':'p3','embeddableConfig':{'attributes':v3['attributes'],'enhancements':{}},'title':'P99 Latency (ms)'},
+    {'type':'lens','gridData':{'x':24,'y':15,'w':24,'h':15,'i':'p4'},'panelIndex':'p4','embeddableConfig':{'attributes':v4['attributes'],'enhancements':{}},'title':'Error Rate %'},
+])
+
+dash_obj = {
+    'type': 'dashboard',
+    'id': 'paypal-merchant-observability-dashboard',
+    'attributes': {
+        'title': 'PayPal Merchant Observability',
+        'description': 'Live PayPal telemetry — errors, latency, and throughput by service',
+        'panelsJSON': panels,
+        'optionsJSON': json.dumps({'hidePanelTitles': False, 'useMargins': True}),
+        'version': 1,
+        'timeRestore': True,
+        'timeTo': 'now',
+        'timeFrom': 'now-1h',
+        'refreshInterval': {'pause': False, 'value': 10000},
+        'kibanaSavedObjectMeta': {'searchSourceJSON': json.dumps({'query': {'query': '', 'language': 'kuery'}, 'filter': []})},
+    },
+    'references': [],
+}
+
+ndjson = json.dumps({'objects': [dash_obj]}).encode()
+
+# Import the dashboard
+req = urllib.request.Request(
+    f'{KIBANA}/api/saved_objects/_import?overwrite=true',
+    data=None, method='POST',
+    headers={'Authorization': AUTH, 'kbn-xsrf': 'true'})
+# Use multipart form for _import endpoint
+import io
+boundary = b'----FormBoundary'
+body_parts = [
+    b'------FormBoundary\r\nContent-Disposition: form-data; name="file"; filename="dashboard.ndjson"\r\nContent-Type: application/x-ndjson\r\n\r\n',
+    (json.dumps(dash_obj) + '\n').encode(),
+    b'\r\n------FormBoundary--\r\n',
+]
+body = b''.join(body_parts)
+req2 = urllib.request.Request(
+    f'{KIBANA}/api/saved_objects/_import?overwrite=true',
+    data=body, method='POST',
+    headers={
+        'Authorization': AUTH,
+        'kbn-xsrf': 'true',
+        'Content-Type': 'multipart/form-data; boundary=----FormBoundary',
+    })
+try:
+    with urllib.request.urlopen(req2, context=CTX, timeout=30) as r:
+        resp2 = json.loads(r.read())
+        print(f'Dashboard import: success={resp2.get("success")}, '
+              f'created={len(resp2.get("successResults",[]))}')
+except Exception as ex:
+    print(f'Dashboard import error: {ex}')
+KIBANA_DASH_EOF
+
+  echo "Kibana data view + dashboard setup done ✓"
+else
+  echo "WARN: Skipping Kibana dashboard setup — KIBANA_URL or BASE64 not set"
+fi
 
 echo "Track setup complete — PayPal Merchant Observability environment ready."
