@@ -189,11 +189,11 @@ FROM logs-apm.otel-*
 
 You should see 7 distinct services and a growing log count.
 
-> **If you see "Unknown column @timestamp" or "No results":** The OTLP data pipeline is still warming up. Switch to the **Terminal** tab and run:
+> **If you see "Unknown column @timestamp" or "No results":** Switch to the **Terminal** tab and run:
 > ```
-> demo-otlp-test
+> otel-logs
 > ```
-> This will test OTLP connectivity and show you the exact HTTP status code. If it returns HTTP 200, wait 30 seconds and retry the query. If it returns 401 or 403, the API key needs to be refreshed — run `demo-restart` to re-initialize the app.
+> You should see lines like `Sent logs for 7 services` every 5 seconds. If you see `HTTP 200 ✓`, data is flowing and will appear in Kibana within 30 seconds. If you see `HTTP 401`, run `demo-otlp-test` for a full connectivity diagnosis.
 
 ---
 

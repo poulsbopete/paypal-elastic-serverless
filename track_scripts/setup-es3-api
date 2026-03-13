@@ -1216,6 +1216,273 @@ else
   echo "WARN: Missing Kibana URL or API key — skipping auto-launch."
 fi
 
+# ── Standalone PayPal OTLP Generator ──────────────────────────────────────────
+# The demo app's OTLP pipeline can silently fail to set its endpoint (the
+# deployer uses HEAD which Elastic rejects, then ignores the provided otlp_url).
+# As a guaranteed fallback, we run a separate systemd service that sends
+# realistic PayPal-shaped logs, metrics, and traces directly via httpx.
+# This service runs alongside the demo app and ensures data always flows.
+if [[ -n "$DEMO_OTLP_URL" && -n "$DEMO_API_KEY" ]]; then
+  echo "Writing PayPal OTLP generator config..."
+  python3 -c "
+import json
+cfg = {
+    'otlp_url': '${DEMO_OTLP_URL}',
+    'api_key':  '${DEMO_API_KEY}',
+}
+with open('/tmp/paypal-otlp.json', 'w') as f:
+    json.dump(cfg, f)
+print('Config written ✓')
+"
+
+  cat > /opt/paypal-otel-gen.py <<'OTELGEN_EOF'
+#!/usr/bin/env python3
+"""PayPal OTLP telemetry generator.
+Sends realistic PayPal-shaped logs, traces, and metrics to Elastic Serverless.
+Reads credentials from /tmp/paypal-otlp.json written by setup-es3-api."""
+
+import httpx, json, time, random, logging, sys, os, struct, hashlib
+from datetime import datetime, timezone
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] paypal-otel: %(message)s',
+    stream=sys.stdout)
+log = logging.getLogger('paypal-otel')
+
+CFG_PATH = '/tmp/paypal-otlp.json'
+
+SERVICES = [
+    {'name': 'merchant-api',          'region': 'us-east-1', 'cloud': 'aws'},
+    {'name': 'checkout-service',      'region': 'us-east-1', 'cloud': 'aws'},
+    {'name': 'payments-orchestrator', 'region': 'us-east-1', 'cloud': 'aws'},
+    {'name': 'fraud-decisioning',     'region': 'us-central1', 'cloud': 'gcp'},
+    {'name': 'settlement-service',    'region': 'us-central1', 'cloud': 'gcp'},
+    {'name': 'merchant-support-api',  'region': 'eastus', 'cloud': 'azure'},
+    {'name': 'notification-service',  'region': 'eastus', 'cloud': 'azure'},
+]
+
+LOG_MESSAGES = {
+    'merchant-api':          ['Merchant profile loaded', 'API key validated', 'Rate limit check passed', 'Merchant settings updated', 'Authentication failed for merchant', 'Invalid merchant ID'],
+    'checkout-service':      ['Checkout session created', 'Cart validated', 'Shipping calculated', 'Session timeout', 'Cart item not found', 'Checkout session expired'],
+    'payments-orchestrator': ['Payment routed to processor', 'Authorization requested', 'Payment captured', 'Routing table miss', 'Payment declined by issuer', 'Authorization timeout'],
+    'fraud-decisioning':     ['Fraud score computed', 'Risk model applied', 'Transaction approved', 'High-risk signal detected', 'Model inference timeout', 'Velocity check failed'],
+    'settlement-service':    ['Settlement batch started', 'Reconciliation complete', 'Funds released', 'Batch file missing', 'Settlement deadline missed', 'Reconciliation error'],
+    'merchant-support-api':  ['Support ticket created', 'Case escalated', 'Account lookup complete', 'Ticket not found', 'SLA breach detected', 'Escalation failed'],
+    'notification-service':  ['Email delivered', 'Push notification sent', 'Webhook dispatched', 'Delivery failed: invalid address', 'Webhook timeout', 'Push token expired'],
+}
+
+def _rand_id(n=16):
+    return hashlib.sha256(str(random.random()).encode()).hexdigest()[:n*2]
+
+def _ts_ns():
+    return int(time.time() * 1e9)
+
+def _attrs(svc):
+    return [
+        {'key': 'service.name',    'value': {'stringValue': svc['name']}},
+        {'key': 'cloud.provider',  'value': {'stringValue': svc['cloud']}},
+        {'key': 'cloud.region',    'value': {'stringValue': svc['region']}},
+        {'key': 'deployment.environment', 'value': {'stringValue': 'production'}},
+    ]
+
+def make_logs(svcs, n_per_svc=3):
+    resource_logs = []
+    for svc in svcs:
+        msgs = LOG_MESSAGES.get(svc['name'], ['Processing request'])
+        records = []
+        for _ in range(n_per_svc):
+            is_error = random.random() < 0.12
+            msg = random.choice(msgs[3:] if is_error and len(msgs) > 3 else msgs[:3])
+            records.append({
+                'timeUnixNano': str(_ts_ns()),
+                'severityText': 'ERROR' if is_error else random.choice(['INFO', 'INFO', 'WARN']),
+                'severityNumber': 17 if is_error else 9,
+                'body': {'stringValue': msg},
+                'traceId': _rand_id(16),
+                'spanId': _rand_id(8),
+                'attributes': [
+                    {'key': 'merchant.id', 'value': {'stringValue': f'M-{random.randint(10000,99999)}'}},
+                    {'key': 'transaction.type', 'value': {'stringValue': random.choice(['payment','refund','dispute'])}},
+                ],
+            })
+        resource_logs.append({
+            'resource': {'attributes': _attrs(svc)},
+            'scopeLogs': [{'scope': {'name': svc['name']}, 'logRecords': records}],
+        })
+    return {'resourceLogs': resource_logs}
+
+def make_traces(svcs, n=2):
+    resource_spans = []
+    for svc in random.sample(svcs, min(n, len(svcs))):
+        trace_id = _rand_id(16)
+        spans = []
+        for i in range(random.randint(1, 4)):
+            dur = random.randint(5, 500) * 1_000_000
+            start = _ts_ns() - dur
+            spans.append({
+                'traceId': trace_id,
+                'spanId': _rand_id(8),
+                'name': random.choice(['POST /api/payment', 'GET /merchant', 'process_transaction', 'fraud_check']),
+                'kind': 2,
+                'startTimeUnixNano': str(start),
+                'endTimeUnixNano': str(start + dur),
+                'status': {'code': 2 if random.random() < 0.08 else 1},
+                'attributes': [
+                    {'key': 'http.method', 'value': {'stringValue': 'POST'}},
+                    {'key': 'http.status_code', 'value': {'intValue': random.choice([200,200,200,500,429])}},
+                ],
+            })
+        resource_spans.append({
+            'resource': {'attributes': _attrs(svc)},
+            'scopeSpans': [{'scope': {'name': svc['name']}, 'spans': spans}],
+        })
+    return {'resourceSpans': resource_spans}
+
+def make_metrics(svcs):
+    resource_metrics = []
+    for svc in svcs:
+        ts = str(_ts_ns())
+        metrics = [
+            {'name': 'http.server.request.duration',
+             'description': 'HTTP server request duration',
+             'unit': 'ms',
+             'gauge': {'dataPoints': [{'timeUnixNano': ts,
+               'asDouble': random.uniform(5, 500),
+               'attributes': [{'key': 'http.route', 'value': {'stringValue': '/api/payment'}}]}]}},
+            {'name': 'payment.success.rate',
+             'description': 'Payment success rate',
+             'unit': '1',
+             'gauge': {'dataPoints': [{'timeUnixNano': ts,
+               'asDouble': random.uniform(0.94, 0.999),
+               'attributes': []}]}},
+        ]
+        resource_metrics.append({
+            'resource': {'attributes': _attrs(svc)},
+            'scopeMetrics': [{'scope': {'name': svc['name']}, 'metrics': metrics}],
+        })
+    return {'resourceMetrics': resource_metrics}
+
+def send(client, url, api_key, signal, payload):
+    try:
+        resp = client.post(
+            f'{url}/v1/{signal}',
+            content=json.dumps(payload).encode(),
+            headers={
+                'Authorization': f'ApiKey {api_key}',
+                'Content-Type': 'application/json',
+            },
+            timeout=15.0,
+        )
+        if resp.status_code == 200:
+            return True
+        else:
+            log.warning('OTLP %s HTTP %s: %s', signal, resp.status_code, resp.text[:300])
+            return False
+    except Exception as e:
+        log.warning('OTLP %s send error: %s', signal, e)
+        return False
+
+def load_cfg():
+    for _ in range(30):
+        try:
+            with open(CFG_PATH) as f:
+                cfg = json.load(f)
+            if cfg.get('otlp_url') and cfg.get('api_key'):
+                log.info('Config loaded: endpoint=%s', cfg['otlp_url'])
+                return cfg
+        except Exception:
+            pass
+        time.sleep(2)
+    log.error('Could not load config from %s after 60s', CFG_PATH)
+    return None
+
+def main():
+    cfg = load_cfg()
+    if not cfg:
+        sys.exit(1)
+
+    url = cfg['otlp_url']
+    key = cfg['api_key']
+
+    log.info('Starting PayPal OTLP generator → %s', url)
+
+    # Initial connectivity test
+    with httpx.Client(http2=True, verify=True) as client:
+        ok = send(client, url, key, 'logs', make_logs(SERVICES, 1))
+        if ok:
+            log.info('Initial OTLP test: HTTP 200 ✓ — data is flowing to Elastic Serverless')
+        else:
+            log.warning('Initial OTLP test failed — will keep retrying')
+
+    tick = 0
+    with httpx.Client(http2=True, verify=True) as client:
+        while True:
+            try:
+                # Logs every cycle (~5s)
+                ok = send(client, url, key, 'logs', make_logs(SERVICES, random.randint(2,5)))
+                if ok:
+                    log.info('Sent logs for %d services', len(SERVICES))
+
+                # Traces every 2 cycles (~10s)
+                if tick % 2 == 0:
+                    ok = send(client, url, key, 'traces', make_traces(SERVICES))
+                    if ok:
+                        log.info('Sent traces ✓')
+
+                # Metrics every 6 cycles (~30s)
+                if tick % 6 == 0:
+                    ok = send(client, url, key, 'metrics', make_metrics(SERVICES))
+                    if ok:
+                        log.info('Sent metrics ✓')
+
+            except Exception as e:
+                log.error('Generator loop error: %s', e)
+
+            tick += 1
+            time.sleep(5)
+
+if __name__ == '__main__':
+    main()
+OTELGEN_EOF
+
+  chmod +x /opt/paypal-otel-gen.py
+
+  cat > /etc/systemd/system/paypal-otel-gen.service <<EOF
+[Unit]
+Description=PayPal OTLP Telemetry Generator
+After=network-online.target elastic-demo.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/python3 /opt/paypal-otel-gen.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=paypal-otel-gen
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable paypal-otel-gen
+  systemctl start paypal-otel-gen
+  echo "PayPal OTLP generator started ✓ (journalctl -u paypal-otel-gen)"
+
+  # Add helper command
+  cat > /usr/local/bin/otel-logs <<'EOF'
+#!/bin/bash
+journalctl -u paypal-otel-gen -f --no-pager
+EOF
+  chmod +x /usr/local/bin/otel-logs
+else
+  echo "WARN: Skipping standalone OTLP generator — missing OTLP URL or API key."
+fi
+
 # ── Index Aliases for ES|QL convenience ──────────────────────────────────────
 # Create short aliases so learners can use `logs.otel` as a friendly name.
 # These are created against the APM data streams that OTLP ingest populates.

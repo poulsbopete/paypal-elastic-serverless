@@ -86,7 +86,7 @@ FROM logs-apm.otel-*
 
 You should see a non-zero `total` and `services = 7`.
 
-> **If you see "Unknown column @timestamp" or "No results":** Run `demo-otlp-test` in the **Terminal** tab to check OTLP connectivity. HTTP 200 = data accepted (wait 30s and retry). HTTP 401/403 = auth issue (run `demo-otlp-errors` to see error details).
+> **If you see "Unknown column" or "No results":** Run `otel-logs` in the **Terminal** tab — you should see `Sent logs for 7 services` every 5 seconds. If it shows `HTTP 200 ✓`, wait 30 seconds and retry the ES|QL query.
 
 Now run this query to see errors by service:
 
