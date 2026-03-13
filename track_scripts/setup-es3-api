@@ -2247,9 +2247,9 @@ DASHBOARD_TITLE = "PayPal Merchant Observability Executive Dashboard"
 CLOUD_GROUPS = [
     {"label": "**AWS** · us-east-1",   "x_start": 0,  "col_width": 15,
      "services": ["merchant-api", "checkout-service", "payments-orchestrator"]},
-    {"label": "**GCP** · us-central1", "x_start": 16, "col_width": 15,
+    {"label": "**GCP** · us-central1", "x_start": 16, "col_width": 16,
      "services": ["fraud-decisioning", "settlement-service"]},
-    {"label": "**Azure** · eastus",    "x_start": 32, "col_width": 16,
+    {"label": "**Azure** · eastus",    "x_start": 33, "col_width": 15,
      "services": ["merchant-support-api", "notification-service"]},
 ]
 
