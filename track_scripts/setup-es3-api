@@ -1164,16 +1164,55 @@ DEMO_API_KEY="${ELASTICSEARCH_API_KEY:-}"
 # We bypass that by computing and passing otlp_url directly.
 DEMO_ES_URL="${ES_URL:-}"
 DEMO_OTLP_URL=""
-if [[ -n "$DEMO_ES_URL" ]]; then
-  # Swap .es. for .ingest. to get the OTLP managed endpoint
-  DEMO_OTLP_URL="${DEMO_ES_URL/.es./.ingest.}"
-  # Strip any trailing slash and ANY existing port (e.g. :9243) then force port 443.
-  # Elastic Serverless OTLP ingest always listens on 443 regardless of the ES port.
-  DEMO_OTLP_URL=$(echo "$DEMO_OTLP_URL" | sed 's|/$||; s|:[0-9]\{2,5\}$||')
-  DEMO_OTLP_URL="${DEMO_OTLP_URL}:443"
-  echo "ES URL       : $DEMO_ES_URL"
-  echo "OTLP endpoint: $DEMO_OTLP_URL"
+
+# Priority 1: Use the `apm` endpoint from project_results.json if present.
+# Elastic Serverless Observability projects expose a dedicated APM/OTLP endpoint
+# that is separate from the Elasticsearch URL. Using it directly is more reliable
+# than deriving a URL from the ES endpoint.
+DEMO_OTLP_URL=$(python3 -c "
+import json, sys
+try:
+    import os
+    regions = os.environ.get('REGIONS','')
+    with open('/tmp/project_results.json') as f:
+        d = json.load(f)
+    # Try the configured region first, then the first key
+    region_data = d.get(regions) or next(iter(d.values()), {})
+    endpoints = region_data.get('endpoints', {})
+    # Try apm, apm_server, fleet, ingest_endpoint in priority order
+    for key in ('apm', 'apm_server', 'fleet', 'ingest', 'ingest_endpoint'):
+        url = endpoints.get(key, '').strip().rstrip('/')
+        if url:
+            print(url)
+            break
+except Exception as e:
+    sys.stderr.write(str(e) + '\n')
+" 2>/dev/null || true)
+
+if [[ -n "$DEMO_OTLP_URL" ]]; then
+  echo "OTLP endpoint (from project apm key): $DEMO_OTLP_URL"
+else
+  # Priority 2: Derive from ES URL by swapping .es. → .ingest.
+  if [[ -n "$DEMO_ES_URL" ]]; then
+    DEMO_OTLP_URL="${DEMO_ES_URL/.es./.ingest.}"
+    DEMO_OTLP_URL=$(echo "$DEMO_OTLP_URL" | sed 's|/$||; s|:[0-9]\{2,5\}$||')
+    DEMO_OTLP_URL="${DEMO_OTLP_URL}:443"
+    echo "OTLP endpoint (derived from ES URL): $DEMO_OTLP_URL"
+  fi
 fi
+
+# Log all available endpoints for diagnostics
+echo "--- All project endpoints ---"
+python3 -c "
+import json
+with open('/tmp/project_results.json') as f:
+    d = json.load(f)
+for region, data in d.items():
+    print(f'Region: {region}')
+    for k,v in data.get('endpoints',{}).items():
+        print(f'  {k}: {v}')
+" 2>/dev/null || true
+echo "-----------------------------"
 
 if [[ "$DEMO_HEALTHY" == "true" && -n "$DEMO_KIBANA_URL" && -n "$DEMO_API_KEY" ]]; then
   # Test OTLP endpoint before launching — log the HTTP status so we know if auth works
@@ -1744,16 +1783,32 @@ EOF
 cat > /usr/local/bin/demo-otlp-test <<'OTLP_TEST_EOF'
 #!/bin/bash
 # Run from the terminal to test OTLP ingestion end-to-end.
-set -euo pipefail
 
-DEPLOY=$(curl -sf http://localhost:8090/api/deployments 2>/dev/null || echo "[]")
-KIBANA_URL=$(echo "$DEPLOY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['kibana_url'] if d else '')" 2>/dev/null || true)
+# Show all available project endpoints first
+echo "=== Project Endpoints ==="
+python3 -c "
+import json
+with open('/tmp/project_results.json') as f:
+    d = json.load(f)
+for region, data in d.items():
+    print(f'Region: {region}')
+    for k,v in data.get('endpoints',{}).items():
+        print(f'  {k}: {v}')
+" 2>/dev/null || echo "(could not read /tmp/project_results.json)"
+echo ""
 
-# Load credentials from agent vars if available
-OTLP_URL=$(agent variable get ES_URL 2>/dev/null \
-  | sed 's|\.es\.|.ingest.|; s|:[0-9]\{2,5\}$||; s|/$||')
-OTLP_URL="${OTLP_URL}:443"
-API_KEY=$(agent variable get ES_API_KEY 2>/dev/null || true)
+# Load OTLP config written by setup
+OTLP_URL=$(python3 -c "import json; c=json.load(open('/tmp/paypal-otlp.json')); print(c['otlp_url'])" 2>/dev/null || true)
+API_KEY=$(python3 -c "import json; c=json.load(open('/tmp/paypal-otlp.json')); print(c.get('api_key',''))" 2>/dev/null || true)
+BASIC=$(python3 -c "import json; c=json.load(open('/tmp/paypal-otlp.json')); print(c.get('basic_auth',''))" 2>/dev/null || true)
+
+# Fallback to agent vars
+if [[ -z "$OTLP_URL" ]]; then
+  OTLP_URL=$(agent variable get ES_URL 2>/dev/null \
+    | sed 's|\.es\.|.ingest.|; s|:[0-9]\{2,5\}$||; s|/$||')
+  OTLP_URL="${OTLP_URL}:443"
+  API_KEY=$(agent variable get ES_API_KEY 2>/dev/null || true)
+fi
 
 echo "=== PayPal OTLP Connectivity Test ==="
 echo "OTLP endpoint : $OTLP_URL"
