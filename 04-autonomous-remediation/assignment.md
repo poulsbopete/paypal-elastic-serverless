@@ -123,7 +123,7 @@ Practice the full ES|QL-based incident investigation workflow.
 Error surge by service in the last 10 minutes:
 
 ```esql
-FROM logs.otel
+FROM logs-apm.otel-*
 | WHERE @timestamp > NOW() - 10 MINUTES
 | WHERE severity_text IN ("ERROR", "CRITICAL")
 | STATS errors = COUNT(*), unique_traces = COUNT_DISTINCT(trace.id) BY service.name
@@ -133,7 +133,7 @@ FROM logs.otel
 Recent error log messages from the top affected service:
 
 ```esql
-FROM logs.otel
+FROM logs-apm.otel-*
 | WHERE @timestamp > NOW() - 10 MINUTES AND severity_text == "ERROR"
 | KEEP @timestamp, service.name, body.text, trace.id
 | SORT @timestamp DESC
@@ -143,7 +143,7 @@ FROM logs.otel
 Error rate trend over time (spot the fault injection spike):
 
 ```esql
-FROM logs.otel
+FROM logs-apm.otel-*
 | WHERE @timestamp > NOW() - 30 MINUTES
 | WHERE severity_text == "ERROR"
 | STATS errors = COUNT(*) BY service.name, BUCKET(@timestamp, 1 minute)

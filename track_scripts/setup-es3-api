@@ -1178,9 +1178,67 @@ else
   echo "WARN: Missing Kibana URL or API key — skipping auto-launch."
 fi
 
+# ── Index Aliases for ES|QL convenience ──────────────────────────────────────
+# Create short aliases so learners can use `logs.otel` as a friendly name.
+# These are created against the APM data streams that OTLP ingest populates.
+# We wait up to 60s for at least one data stream to exist before aliasing.
+if [[ -n "$ES_URL" && -n "$ELASTICSEARCH_API_KEY" ]]; then
+  echo "Waiting for OTLP data streams to appear..."
+  for i in $(seq 1 30); do
+    DS_COUNT=$(curl -sf "${ES_URL}/_data_stream/logs-apm.otel-*" \
+      -H "Authorization: ApiKey ${ELASTICSEARCH_API_KEY}" 2>/dev/null \
+      | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('data_streams',[])))" 2>/dev/null || echo 0)
+    if [[ "$DS_COUNT" -ge 1 ]]; then
+      echo "Data streams found after $((i*2))s ($DS_COUNT streams) ✓"
+      break
+    fi
+    if [[ $i -eq 30 ]]; then
+      echo "WARN: No OTLP data streams after 60s — aliases may not be created."
+    fi
+    sleep 2
+  done
+
+  # Create data stream aliases so legacy query `FROM logs.otel` works
+  for DS_ALIAS in "logs.otel:logs-apm.otel-*" "traces.otel:traces-apm.otel-*" "metrics.otel:metrics-apm.otel-*"; do
+    ALIAS="${DS_ALIAS%%:*}"
+    PATTERN="${DS_ALIAS##*:}"
+    # Get concrete stream names matching the pattern
+    STREAMS=$(curl -sf "${ES_URL}/_data_stream/${PATTERN}" \
+      -H "Authorization: ApiKey ${ELASTICSEARCH_API_KEY}" 2>/dev/null \
+      | python3 -c "import sys,json; d=json.load(sys.stdin); print('\n'.join(s['name'] for s in d.get('data_streams',[])))" 2>/dev/null || true)
+    if [[ -z "$STREAMS" ]]; then
+      echo "  WARN: No data streams matched $PATTERN — skipping alias $ALIAS"
+      continue
+    fi
+    # Build actions array
+    ACTIONS="[]"
+    while IFS= read -r STREAM; do
+      [[ -z "$STREAM" ]] && continue
+      ACTIONS=$(echo "$ACTIONS" | python3 -c "
+import sys, json
+acts = json.load(sys.stdin)
+acts.append({'add': {'index': '${STREAM}', 'alias': '${ALIAS}'}})
+print(json.dumps(acts))
+")
+    done <<< "$STREAMS"
+    HTTP=$(curl -s -o /tmp/alias_resp.json -w "%{http_code}" -X POST \
+      "${ES_URL}/_aliases" \
+      -H "Authorization: ApiKey ${ELASTICSEARCH_API_KEY}" \
+      -H "Content-Type: application/json" \
+      -d "{\"actions\":${ACTIONS}}")
+    if [[ "$HTTP" == "200" ]]; then
+      echo "  Alias created: $ALIAS → $PATTERN ✓"
+    else
+      echo "  WARN: Alias $ALIAS returned HTTP $HTTP"
+      cat /tmp/alias_resp.json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('error',{}).get('reason',''))" 2>/dev/null || true
+    fi
+  done
+  echo "Index aliases done."
+fi
+
 # ── ML Anomaly Detection Jobs ─────────────────────────────────────────────────
 # Create 3 ML jobs that detect anomalies in PayPal merchant transactions.
-# Jobs run against logs.otel once data starts flowing.
+# Jobs run against logs-apm.otel-* once data starts flowing.
 if [[ -n "$ES_URL" && -n "$ELASTICSEARCH_API_KEY" ]]; then
   echo "Creating PayPal ML anomaly detection jobs..."
 

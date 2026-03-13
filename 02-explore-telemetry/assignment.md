@@ -44,7 +44,7 @@ tabs:
   title: Demo App
   type: service
   hostname: es3-api
-  path: /
+  path: /home
   port: 8090
 - id: dbuch240epcz
   title: Elastic Serverless
@@ -75,12 +75,21 @@ With live OTLP telemetry flowing from all 7 PayPal microservices, let's demonstr
 
 ## Step 1 — Find Errors Across All Services
 
-Open the **Elastic Serverless** tab → **Discover** → switch data view to `logs.otel`.
+Open the **Elastic Serverless** tab → **Discover**. In Discover, select **ES|QL** as the query language (top left). The OTLP data lives in the `logs-apm.otel-default` data stream.
 
-Run this ES|QL query to see errors by service:
+First, confirm data is flowing with this count query:
 
 ```esql
-FROM logs.otel
+FROM logs-apm.otel-*
+| STATS total = COUNT(*), services = COUNT_DISTINCT(service.name)
+```
+
+You should see a non-zero `total` and `services = 7`. If total is 0, the telemetry pipeline is still warming up — wait 30 seconds and retry.
+
+Now run this query to see errors by service:
+
+```esql
+FROM logs-apm.otel-*
 | WHERE severity_text == "ERROR"
 | STATS error_count = COUNT(*) BY service.name
 | SORT error_count DESC
@@ -95,7 +104,7 @@ This is the equivalent of a CAL query but with zero specialist syntax — and it
 Pick the service with the highest error count from Step 1 and drill into its recent errors:
 
 ```esql
-FROM logs.otel
+FROM logs-apm.otel-*
 | WHERE severity_text == "ERROR"
 | STATS errors = COUNT(*), last_seen = MAX(@timestamp) BY service.name
 | SORT errors DESC
@@ -105,7 +114,7 @@ FROM logs.otel
 Now drill into the top service to see individual log messages (replace the service name with one from the results above):
 
 ```esql
-FROM logs.otel
+FROM logs-apm.otel-*
 | WHERE service.name == "payments-orchestrator" AND severity_text == "ERROR"
 | KEEP @timestamp, service.name, severity_text, body.text, trace.id
 | SORT @timestamp DESC
@@ -127,3 +136,31 @@ In Kibana, go to **APM** → **Traces** and paste the `trace.id` into the search
 ## Step 4 — Check the Service Map
 
 In Kibana, go to **APM** → **Service Map**. You should see all 7 PayPal microservices with live dependency lines. Hover any service to see its P99 latency and error rate.
+
+---
+
+## Step 5 — Ask the AI Agent
+
+Click the **AI Assistant** button in Kibana and copy/paste these questions — each one demonstrates a real-world PayPal SRE investigation workflow:
+
+```
+Which service has the highest error rate right now and what are the most common error messages?
+```
+
+```
+Show me the P99 latency trend for the checkout-service over the last hour. Is it within SLO?
+```
+
+```
+I'm investigating a checkout failure. Walk me through how to trace a failed transaction from the checkout-service through to the payments-orchestrator.
+```
+
+```
+Compare error rates across all 7 services and tell me which ones look anomalous.
+```
+
+```
+What would a CAL query for 'all ERROR events from the payments-orchestrator in the last 15 minutes' look like as an ES|QL query?
+```
+
+Notice how the AI Agent answers using your actual live data — not generic documentation responses.

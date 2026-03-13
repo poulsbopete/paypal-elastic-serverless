@@ -65,7 +65,7 @@ notes:
     ES|QL is Elastic's pipe-based query language for high-volume telemetry. One language across logs, metrics, and traces.
 
     ```esql
-    FROM logs.otel
+    FROM logs-apm.otel-*
     | WHERE merchant.id == "M-98231" AND severity_text == "ERROR"
     | STATS errors = COUNT(*) BY service.name
     | SORT errors DESC
@@ -103,7 +103,7 @@ tabs:
   title: Demo App
   type: service
   hostname: es3-api
-  path: /
+  path: /home
   port: 8090
 - id: ouotjjliyyi1
   title: Elastic Serverless
@@ -180,14 +180,38 @@ Review the pre-provisioned assets: **Dashboards**, **APM Service Map**, **AI Inv
 
 ## Step 5 — Verify Live Telemetry
 
-In Kibana, open **Discover** and select the `logs.otel` data view. You should see logs flowing from all 7 services with `service.name`, `severity_text`, `body.text`, and `trace.id` fields populated.
+In Kibana, open **Discover** and select the `logs-apm.otel-*` data view. You should see logs flowing from all 7 services with `service.name`, `severity_text`, `body.text`, and `trace.id` fields populated.
 
 Run this ES|QL query to confirm:
 
 ```esql
-FROM logs.otel
+FROM logs-apm.otel-*
 | STATS services = COUNT_DISTINCT(service.name), log_count = COUNT(*)
 | KEEP services, log_count
 ```
 
 You should see 7 distinct services and a growing log count.
+
+---
+
+## Step 6 — Ask the AI Agent
+
+In Kibana, click the **AI Assistant** button (top-right, sparkle icon). Copy and paste each question:
+
+```
+Which services are currently sending telemetry and what is the overall health of each?
+```
+
+```
+What is the error rate across all services in the last 30 minutes? Which service has the highest?
+```
+
+```
+Give me a summary of the PayPal payment platform telemetry that is flowing into Elastic right now.
+```
+
+```
+What data views and dashboards are available in this Elastic environment?
+```
+
+The AI Agent has direct access to your live telemetry — every answer is grounded in real data from the running services, not a generic response.
