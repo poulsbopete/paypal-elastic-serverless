@@ -1224,15 +1224,24 @@ fi
 # This service runs alongside the demo app and ensures data always flows.
 if [[ -n "$DEMO_OTLP_URL" && -n "$DEMO_API_KEY" ]]; then
   echo "Writing PayPal OTLP generator config..."
+  # Include Basic auth credentials as fallback in case ApiKey auth is rejected
+  # by the managed ingest endpoint (some Serverless deployments enforce this).
+  _ES_USER=$(jq -r --arg r "$REGIONS" '.[$r].credentials.username // "admin"' /tmp/project_results.json 2>/dev/null || echo "admin")
+  _ES_PASS="${ELASTICSEARCH_PASSWORD:-}"
   python3 -c "
-import json
+import json, base64
+api_key = '${DEMO_API_KEY}'
+es_user  = '${_ES_USER}'
+es_pass  = '${_ES_PASS}'
+basic    = base64.b64encode(f'{es_user}:{es_pass}'.encode()).decode() if es_pass else ''
 cfg = {
-    'otlp_url': '${DEMO_OTLP_URL}',
-    'api_key':  '${DEMO_API_KEY}',
+    'otlp_url':   '${DEMO_OTLP_URL}',
+    'api_key':    api_key,
+    'basic_auth': basic,
 }
 with open('/tmp/paypal-otlp.json', 'w') as f:
     json.dump(cfg, f)
-print('Config written ✓')
+print('Config written ✓  basic_auth available:', bool(basic))
 "
 
   cat > /opt/paypal-otel-gen.py <<'OTELGEN_EOF'
@@ -1363,13 +1372,13 @@ def make_metrics(svcs):
         })
     return {'resourceMetrics': resource_metrics}
 
-def send(client, url, api_key, signal, payload):
+def send(client, url, auth_header, signal, payload):
     try:
         resp = client.post(
             f'{url}/v1/{signal}',
             content=json.dumps(payload).encode(),
             headers={
-                'Authorization': f'ApiKey {api_key}',
+                'Authorization': auth_header,
                 'Content-Type': 'application/json',
             },
             timeout=15.0,
@@ -1383,12 +1392,41 @@ def send(client, url, api_key, signal, payload):
         log.warning('OTLP %s send error: %s', signal, e)
         return False
 
+def probe_auth(url, api_key, basic_auth):
+    """Try ApiKey then Basic auth; return the working auth header or None."""
+    test_payload = make_logs(SERVICES[:1], 1)
+    candidates = []
+    if api_key:
+        candidates.append(('ApiKey', f'ApiKey {api_key}'))
+    if basic_auth:
+        candidates.append(('Basic', f'Basic {basic_auth}'))
+
+    with httpx.Client(http2=False, verify=True) as client:
+        for label, header in candidates:
+            try:
+                resp = client.post(
+                    f'{url}/v1/logs',
+                    content=json.dumps(test_payload).encode(),
+                    headers={'Authorization': header, 'Content-Type': 'application/json'},
+                    timeout=15.0,
+                )
+                log.info('Auth probe [%s]: HTTP %s', label, resp.status_code)
+                if resp.status_code == 200:
+                    log.info('AUTH OK with %s — data is flowing to Elastic Serverless ✓', label)
+                    return header
+                else:
+                    log.warning('Auth [%s] rejected: %s', label, resp.text[:200])
+            except Exception as e:
+                log.warning('Auth probe [%s] error: %s', label, e)
+    log.error('All auth methods failed. Check ES_URL and credentials.')
+    return None
+
 def load_cfg():
     for _ in range(30):
         try:
             with open(CFG_PATH) as f:
                 cfg = json.load(f)
-            if cfg.get('otlp_url') and cfg.get('api_key'):
+            if cfg.get('otlp_url') and (cfg.get('api_key') or cfg.get('basic_auth')):
                 log.info('Config loaded: endpoint=%s', cfg['otlp_url'])
                 return cfg
         except Exception:
@@ -1402,37 +1440,36 @@ def main():
     if not cfg:
         sys.exit(1)
 
-    url = cfg['otlp_url']
-    key = cfg['api_key']
+    url       = cfg['otlp_url']
+    api_key   = cfg.get('api_key', '')
+    basic_auth = cfg.get('basic_auth', '')
 
     log.info('Starting PayPal OTLP generator → %s', url)
 
-    # Initial connectivity test
-    with httpx.Client(http2=True, verify=True) as client:
-        ok = send(client, url, key, 'logs', make_logs(SERVICES, 1))
-        if ok:
-            log.info('Initial OTLP test: HTTP 200 ✓ — data is flowing to Elastic Serverless')
-        else:
-            log.warning('Initial OTLP test failed — will keep retrying')
+    # Find a working auth method
+    auth_header = probe_auth(url, api_key, basic_auth)
+    if not auth_header:
+        log.error('Cannot send telemetry — no working auth. Check credentials.')
+        sys.exit(1)
 
     tick = 0
-    with httpx.Client(http2=True, verify=True) as client:
+    with httpx.Client(http2=False, verify=True) as client:
         while True:
             try:
                 # Logs every cycle (~5s)
-                ok = send(client, url, key, 'logs', make_logs(SERVICES, random.randint(2,5)))
+                ok = send(client, url, auth_header, 'logs', make_logs(SERVICES, random.randint(2,5)))
                 if ok:
-                    log.info('Sent logs for %d services', len(SERVICES))
+                    log.info('Sent logs for %d services (tick %d)', len(SERVICES), tick)
 
                 # Traces every 2 cycles (~10s)
                 if tick % 2 == 0:
-                    ok = send(client, url, key, 'traces', make_traces(SERVICES))
+                    ok = send(client, url, auth_header, 'traces', make_traces(SERVICES))
                     if ok:
                         log.info('Sent traces ✓')
 
                 # Metrics every 6 cycles (~30s)
                 if tick % 6 == 0:
-                    ok = send(client, url, key, 'metrics', make_metrics(SERVICES))
+                    ok = send(client, url, auth_header, 'metrics', make_metrics(SERVICES))
                     if ok:
                         log.info('Sent metrics ✓')
 
