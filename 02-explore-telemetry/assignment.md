@@ -84,7 +84,9 @@ FROM logs-apm.otel-*
 | STATS total = COUNT(*), services = COUNT_DISTINCT(service.name)
 ```
 
-You should see a non-zero `total` and `services = 7`. If total is 0, the telemetry pipeline is still warming up — wait 30 seconds and retry.
+You should see a non-zero `total` and `services = 7`.
+
+> **If you see "Unknown column @timestamp" or "No results":** Run `demo-otlp-test` in the **Terminal** tab to check OTLP connectivity. HTTP 200 = data accepted (wait 30s and retry). HTTP 401/403 = auth issue (run `demo-otlp-errors` to see error details).
 
 Now run this query to see errors by service:
 

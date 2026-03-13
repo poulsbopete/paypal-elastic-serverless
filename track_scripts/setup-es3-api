@@ -1038,35 +1038,73 @@ except Exception as e:
     print(f"WARN: deployer.py patch failed: {e}", file=sys.stderr)
 DEPLOYER_PATCH_EOF
 
-# Also patch telemetry.py: log errors when OTLP sends fail (currently they're silent)
+# Patch telemetry.py: surface ALL OTLP HTTP errors (4xx/5xx) which were previously silent.
+# Strategy: find the _send method's try/except block and:
+#   1. Add raise_for_status() after the response so non-2xx throws HTTPStatusError
+#   2. Catch HTTPStatusError explicitly and log status + body snippet
+#   3. Also log network errors
 python3 - <<'TELEMETRY_PATCH_EOF'
-import sys
+import sys, re
 
 path = "/opt/elastic-launch-demo/app/telemetry.py"
 try:
     with open(path) as f:
         content = f.read()
 
-    OLD = (
-        "        except httpx.RequestError as exc:\n"
-        "            self.consecutive_failures += 1"
-    )
-    NEW = (
-        "        except httpx.HTTPStatusError as exc:\n"
-        "            self.consecutive_failures += 1\n"
-        "            logger.warning(\"OTLP %s HTTP error: %s %s\", signal_name, exc.response.status_code, exc.response.text[:200])\n"
-        "        except httpx.RequestError as exc:\n"
-        "            self.consecutive_failures += 1\n"
-        "            logger.warning(\"OTLP %s network error: %s\", signal_name, exc)"
-    )
+    applied = []
 
-    if OLD in content:
-        patched = content.replace(OLD, NEW)
+    # --- Patch 1: add raise_for_status() right after response = client.post(...)
+    # Matches:   response = self._client.post(url, ...)  (any args)
+    # Inserts:   response.raise_for_status()   on the next line with same indent
+    pat1 = r'([ \t]+)(response\s*=\s*(?:self\._client|client)\.post\([^)]+\))\n(?!\s*response\.raise_for_status)'
+    def inject_raise(m):
+        indent = m.group(1)
+        return f"{indent}{m.group(2)}\n{indent}response.raise_for_status()\n"
+    new_content, n = re.subn(pat1, inject_raise, content)
+    if n:
+        content = new_content
+        applied.append(f"raise_for_status() injected ({n} site(s))")
+
+    # --- Patch 2: broaden the except clause to also catch HTTPStatusError
+    pat2 = r'(\s+)(except\s+httpx\.RequestError\s+as\s+exc\s*:)'
+    def broaden_except(m):
+        indent = m.group(1)
+        return (
+            f"{indent}except httpx.HTTPStatusError as exc:\n"
+            f"{indent}    self.consecutive_failures += 1\n"
+            f"{indent}    logger.warning(\"OTLP HTTP %s: %s — %s\", exc.response.status_code, signal_name, exc.response.text[:300])\n"
+            f"{indent}{m.group(2)}"
+        )
+    new_content, n = re.subn(pat2, broaden_except, content)
+    if n:
+        content = new_content
+        applied.append(f"HTTPStatusError except added ({n} site(s))")
+
+    # --- Patch 3: add a warning log inside the RequestError block if not already there
+    pat3 = r'(except\s+httpx\.RequestError\s+as\s+exc\s*:\n)([ \t]+)(self\.consecutive_failures\s*\+=\s*1\n)(?!.*logger\.warning.*network)'
+    def add_req_log(m):
+        return (
+            f"{m.group(1)}"
+            f"{m.group(2)}{m.group(3)}"
+            f"{m.group(2)}logger.warning(\"OTLP network error (%s): %s\", signal_name, exc)\n"
+        )
+    new_content, n = re.subn(pat3, add_req_log, content, flags=re.DOTALL)
+    if n:
+        content = new_content
+        applied.append(f"RequestError warning log added ({n} site(s))")
+
+    if applied:
         with open(path, "w") as f:
-            f.write(patched)
-        print("telemetry.py: OTLP error logging patched ✓")
+            f.write(content)
+        for msg in applied:
+            print(f"telemetry.py: {msg} ✓")
     else:
-        print("WARN: OTLP except pattern not found in telemetry.py", file=sys.stderr)
+        print("WARN: telemetry.py — no patch patterns matched; file may already be patched or structure changed", file=sys.stderr)
+        # Show a snippet around the _send method for diagnostics
+        lines = content.splitlines()
+        for i, line in enumerate(lines):
+            if '_send' in line or 'raise_for_status' in line or 'HTTPStatusError' in line:
+                print(f"  line {i+1}: {line}", file=sys.stderr)
 except Exception as e:
     print(f"WARN: telemetry.py patch failed: {e}", file=sys.stderr)
 TELEMETRY_PATCH_EOF
@@ -1127,14 +1165,14 @@ DEMO_API_KEY="${ELASTICSEARCH_API_KEY:-}"
 DEMO_ES_URL="${ES_URL:-}"
 DEMO_OTLP_URL=""
 if [[ -n "$DEMO_ES_URL" ]]; then
-  # Swap .es. for .ingest. to get the OTLP endpoint
+  # Swap .es. for .ingest. to get the OTLP managed endpoint
   DEMO_OTLP_URL="${DEMO_ES_URL/.es./.ingest.}"
-  # Remove any trailing slash then append :443 if not already present
-  DEMO_OTLP_URL="${DEMO_OTLP_URL%/}"
-  if [[ "$DEMO_OTLP_URL" != *":443" ]]; then
-    DEMO_OTLP_URL="${DEMO_OTLP_URL}:443"
-  fi
-  echo "Derived OTLP endpoint: $DEMO_OTLP_URL"
+  # Strip any trailing slash and ANY existing port (e.g. :9243) then force port 443.
+  # Elastic Serverless OTLP ingest always listens on 443 regardless of the ES port.
+  DEMO_OTLP_URL=$(echo "$DEMO_OTLP_URL" | sed 's|/$||; s|:[0-9]\{2,5\}$||')
+  DEMO_OTLP_URL="${DEMO_OTLP_URL}:443"
+  echo "ES URL       : $DEMO_ES_URL"
+  echo "OTLP endpoint: $DEMO_OTLP_URL"
 fi
 
 if [[ "$DEMO_HEALTHY" == "true" && -n "$DEMO_KIBANA_URL" && -n "$DEMO_API_KEY" ]]; then
@@ -1398,12 +1436,88 @@ sleep 3
 curl -s http://localhost:8090/health
 EOF
 
+# ── Diagnostic: test OTLP auth + connectivity directly from the terminal ──────
+cat > /usr/local/bin/demo-otlp-test <<'OTLP_TEST_EOF'
+#!/bin/bash
+# Run from the terminal to test OTLP ingestion end-to-end.
+set -euo pipefail
+
+DEPLOY=$(curl -sf http://localhost:8090/api/deployments 2>/dev/null || echo "[]")
+KIBANA_URL=$(echo "$DEPLOY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['kibana_url'] if d else '')" 2>/dev/null || true)
+
+# Load credentials from agent vars if available
+OTLP_URL=$(agent variable get ES_URL 2>/dev/null \
+  | sed 's|\.es\.|.ingest.|; s|:[0-9]\{2,5\}$||; s|/$||')
+OTLP_URL="${OTLP_URL}:443"
+API_KEY=$(agent variable get ES_API_KEY 2>/dev/null || true)
+
+echo "=== PayPal OTLP Connectivity Test ==="
+echo "OTLP endpoint : $OTLP_URL"
+echo "API key prefix: ${API_KEY:0:12}..."
+echo ""
+
+if [[ -z "$OTLP_URL" || "$OTLP_URL" == ":443" ]]; then
+  echo "ERROR: Could not read ES_URL from agent variables."
+  echo "Check: agent variable get ES_URL"
+  exit 1
+fi
+
+TS=$(date +%s%N 2>/dev/null || date +%s)000000000
+PAYLOAD="{\"resourceLogs\":[{\"resource\":{\"attributes\":[{\"key\":\"service.name\",\"value\":{\"stringValue\":\"otlp-test\"}}]},\"scopeLogs\":[{\"scope\":{},\"logRecords\":[{\"timeUnixNano\":\"${TS}\",\"severityText\":\"INFO\",\"body\":{\"stringValue\":\"demo-otlp-test probe\"},\"attributes\":[]}]}]}]}"
+
+echo "--- Sending test log to ${OTLP_URL}/v1/logs ---"
+HTTP=$(curl -s -o /tmp/otlp_result.json -w "%{http_code}" \
+  -X POST "${OTLP_URL}/v1/logs" \
+  -H "Authorization: ApiKey ${API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d "$PAYLOAD" 2>&1) || HTTP="000"
+
+echo "HTTP status: $HTTP"
+cat /tmp/otlp_result.json 2>/dev/null | python3 -m json.tool 2>/dev/null || cat /tmp/otlp_result.json 2>/dev/null
+echo ""
+
+if [[ "$HTTP" == "200" ]]; then
+  echo "✓ OTLP auth OK — logs are being accepted. Data should appear in Kibana within 30s."
+  echo ""
+  echo "--- Checking Elasticsearch data streams ---"
+  ES_URL=$(agent variable get ES_URL 2>/dev/null || true)
+  DS=$(curl -sf "${ES_URL}/_data_stream/logs-apm.otel-*" \
+    -H "Authorization: ApiKey ${API_KEY}" 2>/dev/null \
+    | python3 -c "import sys,json; d=json.load(sys.stdin); [print('  '+s['name'], s.get('status','')) for s in d.get('data_streams',[])]" 2>/dev/null || echo "  (unable to query data streams)")
+  echo "$DS"
+elif [[ "$HTTP" == "401" || "$HTTP" == "403" ]]; then
+  echo "✗ Authentication failed (HTTP $HTTP) — API key may be expired or lack write permissions."
+  echo "  Try: agent variable get ES_API_KEY"
+elif [[ "$HTTP" == "000" ]]; then
+  echo "✗ Connection failed — check network access to OTLP endpoint."
+else
+  echo "✗ Unexpected HTTP $HTTP — see response above."
+fi
+OTLP_TEST_EOF
+
+# ── Diagnostic: show recent OTLP errors from the app log ─────────────────────
+cat > /usr/local/bin/demo-otlp-errors <<'EOF'
+#!/bin/bash
+echo "=== Recent OTLP errors from demo app ==="
+journalctl -u elastic-demo --no-pager -n 100 \
+  | grep -E "OTLP|HTTP error|network error|WARNING|ERROR|exception|Traceback" \
+  | tail -40 || echo "(no matching lines found)"
+EOF
+
 chmod +x /usr/local/bin/demo-logs \
          /usr/local/bin/demo-status \
          /usr/local/bin/demo-deployments \
          /usr/local/bin/demo-chaos \
-         /usr/local/bin/demo-restart
+         /usr/local/bin/demo-restart \
+         /usr/local/bin/demo-otlp-test \
+         /usr/local/bin/demo-otlp-errors
 
 echo "Demo helper commands installed in /usr/local/bin ✓"
+echo "  demo-logs          — stream live app logs"
+echo "  demo-otlp-test     — test OTLP auth + connectivity"
+echo "  demo-otlp-errors   — show recent OTLP errors in app logs"
+echo "  demo-deployments   — show running scenarios"
+echo "  demo-chaos         — show chaos channel status"
+echo "  demo-restart       — restart the demo app"
 
 echo "Track setup complete — PayPal Merchant Observability environment ready."

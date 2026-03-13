@@ -180,17 +180,20 @@ Review the pre-provisioned assets: **Dashboards**, **APM Service Map**, **AI Inv
 
 ## Step 5 — Verify Live Telemetry
 
-In Kibana, open **Discover** and select the `logs-apm.otel-*` data view. You should see logs flowing from all 7 services with `service.name`, `severity_text`, `body.text`, and `trace.id` fields populated.
-
-Run this ES|QL query to confirm:
+In Kibana, open **Discover**, select **ES|QL** as the query language, and run this count query:
 
 ```esql
 FROM logs-apm.otel-*
 | STATS services = COUNT_DISTINCT(service.name), log_count = COUNT(*)
-| KEEP services, log_count
 ```
 
 You should see 7 distinct services and a growing log count.
+
+> **If you see "Unknown column @timestamp" or "No results":** The OTLP data pipeline is still warming up. Switch to the **Terminal** tab and run:
+> ```
+> demo-otlp-test
+> ```
+> This will test OTLP connectivity and show you the exact HTTP status code. If it returns HTTP 200, wait 30 seconds and retry the query. If it returns 401 or 403, the API key needs to be refreshed — run `demo-restart` to re-initialize the app.
 
 ---
 
