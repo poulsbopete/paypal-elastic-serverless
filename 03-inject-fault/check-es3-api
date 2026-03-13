@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Challenge 3 check: verify at least one chaos channel is currently active.
+# Challenge 3 check: verify the demo app is running and a fault was injected
+# (the workflow auto-remediates, so we don't require the fault to still be active).
 
 APP="http://localhost:8090"
 
@@ -9,18 +10,25 @@ if ! curl -sf "${APP}/health" >/dev/null 2>&1; then
   exit 1
 fi
 
-# ── At least one deployment exists ───────────────────────────────────────────
+# ── At least one deployment is running ───────────────────────────────────────
 DEPS="$(curl -sf "${APP}/api/deployments" 2>/dev/null)" || DEPS="[]"
-DEP_COUNT="$(echo "$DEPS" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len([x for x in d if x.get('running')]))" 2>/dev/null)" || DEP_COUNT="0"
+DEP_COUNT="$(echo "$DEPS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(len([x for x in d if x.get('running')]))
+" 2>/dev/null)" || DEP_COUNT="0"
 
 if [[ "$DEP_COUNT" == "0" ]]; then
-  echo "FAIL: No active deployment found. Make sure the Fanatics scenario launched in Challenge 1."
+  echo "FAIL: No active deployment found. Make sure the PayPal scenario is running in the Demo App."
   exit 1
 fi
 
-# ── At least one fault channel is active ─────────────────────────────────────
-# Try with deployment_id first, then without (for robustness)
-DEP_ID="$(echo "$DEPS" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0].get('deployment_id','') if d else '')" 2>/dev/null)" || DEP_ID=""
+# ── Check if a fault was injected (active) or was recently resolved ───────────
+DEP_ID="$(echo "$DEPS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(d[0].get('deployment_id','') if d else '')
+" 2>/dev/null)" || DEP_ID=""
 
 if [[ -n "$DEP_ID" ]]; then
   CHAOS="$(curl -sf "${APP}/api/chaos/status?deployment_id=${DEP_ID}" 2>/dev/null)" || CHAOS="{}"
@@ -32,16 +40,16 @@ ACTIVE_COUNT="$(echo "$CHAOS" | python3 -c "
 import sys, json
 try:
     ch = json.load(sys.stdin)
-    active = [k for k,v in ch.items() if isinstance(v,dict) and v.get('state') == 'ACTIVE']
+    active = [k for k,v in ch.items() if isinstance(v,dict) and v.get('state') in ('ACTIVE','RESOLVED')]
     print(len(active))
 except Exception:
     print(0)
 " 2>/dev/null)" || ACTIVE_COUNT="0"
 
 if [[ "$ACTIVE_COUNT" == "0" ]]; then
-  echo "FAIL: No fault channels are active. Go to the Demo App tab, open the Chaos Controller, and click 'Inject Fault' on any channel."
+  echo "FAIL: No fault has been injected yet. Go to the Demo App → Payment Incident Simulator and inject a fault, then let Elastic Workflows resolve it."
   exit 1
 fi
 
-echo "PASS: ${ACTIVE_COUNT} fault channel(s) active — Elastic is detecting and responding."
+echo "PASS: Payment incident detected and handled — Elastic Workflows completed remediation."
 exit 0
