@@ -772,6 +772,43 @@ REPLACEMENTS = [
     ("Fanatics Collectibles Escalation and Hold Management",    "PayPal Incident Escalation & Hold Management"),
     ("Fanatics Collectibles Daily Update Report",               "PayPal SRE Daily Health Report"),
 
+    # ── Service name remapping (Fanatics e-commerce → PayPal payments) ──────────
+    # hyphenated  (OTel service.name)
+    ("digital-marketplace",      "merchant-api"),
+    ("card-printing-system",     "checkout-service"),
+    ("auction-engine",           "payments-orchestrator"),
+    ("cloud-inventory-scanner",  "fraud-decisioning"),
+    ("packaging-fulfillment",    "settlement-service"),
+    ("card-grading-service",     "merchant-support-api"),
+    ("authentication-service",   "notification-service"),
+    ("fulfillment-service",      "notification-service"),
+    ("inventory-service",        "merchant-support-api"),
+    ("shipping-service",         "merchant-support-api"),
+    ("mysql-primary",            "payments-datastore"),
+    # CamelCase variants (Python class references)
+    ("DigitalMarketplace",       "MerchantApi"),
+    ("CardPrintingSystem",       "CheckoutService"),
+    ("AuctionEngine",            "PaymentsOrchestrator"),
+    ("CloudInventoryScanner",    "FraudDecisioning"),
+    ("PackagingFulfillment",     "SettlementService"),
+    ("CardGradingService",       "MerchantSupportApi"),
+    ("AuthenticationService",    "NotificationService"),
+    # snake_case variants (Python dict keys / env vars)
+    ("digital_marketplace",      "merchant_api"),
+    ("card_printing_system",     "checkout_service"),
+    ("auction_engine",           "payments_orchestrator"),
+    ("cloud_inventory_scanner",  "fraud_decisioning"),
+    ("packaging_fulfillment",    "settlement_service"),
+    # Display name variants (titles in UI)
+    ("Digital Marketplace",      "Merchant API"),
+    ("Card Printing System",     "Checkout Service"),
+    ("Auction Engine",           "Payments Orchestrator"),
+    ("Cloud Inventory Scanner",  "Fraud Decisioning"),
+    ("Packaging Fulfillment",    "Settlement Service"),
+    ("Card Grading Service",     "Merchant Support API"),
+    ("Authentication Service",   "Notification Service"),
+    ("MySQL Primary",            "Payments Datastore"),
+
     # ── Chaos channel names (map Fanatics retail/network → PayPal payments) ───
     ("MAC Address Flapping",                    "Payment Authorization Timeout"),
     ("Spanning Tree Topology Change",           "Checkout Session Failure Spike"),

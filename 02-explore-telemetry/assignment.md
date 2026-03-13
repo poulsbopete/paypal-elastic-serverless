@@ -27,12 +27,12 @@ notes:
     | Field | Meaning | Example |
     |---|---|---|
     | `service.name` | Which microservice emitted this signal | `checkout-service` |
-    | `merchant.id` | The merchant affected by this event | `M-98231` |
-    | `transaction.id` | The payment transaction being processed | `TXN-44821903` |
     | `trace.id` | Distributed trace spanning all services | `4f8a2c...` |
+    | `span.name` | The operation name within a service | `POST /api/checkout` |
     | `severity_text` | Log level | `ERROR` |
     | `cloud.region` | Where the service is running | `us-east-1` |
     | `http.response.status_code` | HTTP response code | `503` |
+    | `transaction.name` | Transaction type being processed | `checkout.initiate` |
 
     Every service in this lab emits all of these fields automatically via OTel SDK auto-instrumentation.
 tabs:
@@ -102,11 +102,11 @@ FROM logs.otel
 | LIMIT 10
 ```
 
-Now drill into the top service to see individual log messages:
+Now drill into the top service to see individual log messages (replace the service name with one from the results above):
 
 ```esql
 FROM logs.otel
-| WHERE service.name == "checkout-service" AND severity_text == "ERROR"
+| WHERE service.name == "payments-orchestrator" AND severity_text == "ERROR"
 | KEEP @timestamp, service.name, severity_text, body.text, trace.id
 | SORT @timestamp DESC
 | LIMIT 20
