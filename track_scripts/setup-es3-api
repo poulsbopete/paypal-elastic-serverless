@@ -2037,6 +2037,187 @@ echo "  demo-deployments   — show running scenarios"
 echo "  demo-chaos         — show chaos channel status"
 echo "  demo-restart       — restart the demo app"
 
+# ── PayPal Alert Rules (query paypal-otel-logs) ───────────────────────────────
+# The Fanatics scenario created 20 alert rules pointing at empty APM data streams.
+# We add PayPal-specific rules that query paypal-otel-logs and actually fire
+# when the Chaos Controller injects a payment fault.
+if [[ -n "$KIBANA_URL" && -n "$BASE64" ]]; then
+  echo "Creating PayPal alert rules..."
+
+  python3 - <<ALERT_EOF
+import json, urllib.request, urllib.error, ssl, sys
+
+KIBANA = '${KIBANA_URL}'
+AUTH   = 'Basic ${BASE64}'
+CTX    = ssl.create_default_context()
+
+def kbn(method, path, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req  = urllib.request.Request(
+        f'{KIBANA}{path}', data=data, method=method,
+        headers={'Authorization': AUTH, 'kbn-xsrf': 'true',
+                 'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, context=CTX, timeout=30) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode('utf-8', 'replace')
+    except Exception as ex:
+        return 0, str(ex)
+
+# Rule definitions using observability.rules.custom_threshold (works on any index)
+RULES = [
+    {
+        'name': 'PayPal — High Error Rate (any service)',
+        'rule_type_id': 'observability.rules.custom_threshold',
+        'consumer': 'logs',
+        'schedule': {'interval': '1m'},
+        'params': {
+            'criteria': [{
+                'comparator': '>', 'threshold': [20],
+                'timeSize': 5, 'timeUnit': 'm',
+                'metrics': [{'name': 'A', 'filter': 'severity_text: "ERROR"', 'aggType': 'count'}],
+                'equation': 'A',
+            }],
+            'searchConfiguration': {
+                'index': 'paypal-otel-logs',
+                'query': {'query': '', 'language': 'kuery'},
+            },
+            'groupBy': ['service.name'],
+            'alertOnNoData': False,
+            'alertOnGroupDisappear': False,
+        },
+        'actions': [],
+        'tags': ['paypal', 'error-rate'],
+        'notify_when': 'onActionGroupChange',
+    },
+    {
+        'name': 'PayPal — High Latency P99 (any service)',
+        'rule_type_id': 'observability.rules.custom_threshold',
+        'consumer': 'logs',
+        'schedule': {'interval': '1m'},
+        'params': {
+            'criteria': [{
+                'comparator': '>', 'threshold': [2000],
+                'timeSize': 5, 'timeUnit': 'm',
+                'metrics': [{
+                    'name': 'A',
+                    'filter': 'transaction.duration.us: *',
+                    'aggType': 'max',
+                    'field': 'transaction.duration.us',
+                }],
+                'equation': 'A / 1000',
+            }],
+            'searchConfiguration': {
+                'index': 'paypal-otel-logs',
+                'query': {'query': '', 'language': 'kuery'},
+            },
+            'groupBy': ['service.name'],
+            'alertOnNoData': False,
+            'alertOnGroupDisappear': False,
+        },
+        'actions': [],
+        'tags': ['paypal', 'latency'],
+        'notify_when': 'onActionGroupChange',
+    },
+    {
+        'name': 'PayPal — Error Rate Spike (checkout-service)',
+        'rule_type_id': 'observability.rules.custom_threshold',
+        'consumer': 'logs',
+        'schedule': {'interval': '1m'},
+        'params': {
+            'criteria': [{
+                'comparator': '>', 'threshold': [5],
+                'timeSize': 5, 'timeUnit': 'm',
+                'metrics': [{'name': 'A', 'filter': 'severity_text: "ERROR" AND service.name: "checkout-service"', 'aggType': 'count'}],
+                'equation': 'A',
+            }],
+            'searchConfiguration': {
+                'index': 'paypal-otel-logs',
+                'query': {'query': 'service.name: "checkout-service"', 'language': 'kuery'},
+            },
+            'groupBy': [],
+            'alertOnNoData': False,
+            'alertOnGroupDisappear': False,
+        },
+        'actions': [],
+        'tags': ['paypal', 'checkout', 'error-rate'],
+        'notify_when': 'onActionGroupChange',
+    },
+    {
+        'name': 'PayPal — Payments Orchestrator Error Spike',
+        'rule_type_id': 'observability.rules.custom_threshold',
+        'consumer': 'logs',
+        'schedule': {'interval': '1m'},
+        'params': {
+            'criteria': [{
+                'comparator': '>', 'threshold': [5],
+                'timeSize': 5, 'timeUnit': 'm',
+                'metrics': [{'name': 'A', 'filter': 'severity_text: "ERROR" AND service.name: "payments-orchestrator"', 'aggType': 'count'}],
+                'equation': 'A',
+            }],
+            'searchConfiguration': {
+                'index': 'paypal-otel-logs',
+                'query': {'query': 'service.name: "payments-orchestrator"', 'language': 'kuery'},
+            },
+            'groupBy': [],
+            'alertOnNoData': False,
+            'alertOnGroupDisappear': False,
+        },
+        'actions': [],
+        'tags': ['paypal', 'payments', 'error-rate'],
+        'notify_when': 'onActionGroupChange',
+    },
+    {
+        'name': 'PayPal — Fraud Decisioning Latency Spike',
+        'rule_type_id': 'observability.rules.custom_threshold',
+        'consumer': 'logs',
+        'schedule': {'interval': '1m'},
+        'params': {
+            'criteria': [{
+                'comparator': '>', 'threshold': [3000],
+                'timeSize': 5, 'timeUnit': 'm',
+                'metrics': [{
+                    'name': 'A', 'aggType': 'max',
+                    'field': 'transaction.duration.us',
+                    'filter': 'service.name: "fraud-decisioning"',
+                }],
+                'equation': 'A / 1000',
+            }],
+            'searchConfiguration': {
+                'index': 'paypal-otel-logs',
+                'query': {'query': 'service.name: "fraud-decisioning"', 'language': 'kuery'},
+            },
+            'groupBy': [],
+            'alertOnNoData': False,
+            'alertOnGroupDisappear': False,
+        },
+        'actions': [],
+        'tags': ['paypal', 'fraud', 'latency'],
+        'notify_when': 'onActionGroupChange',
+    },
+]
+
+created = 0
+for rule in RULES:
+    status, resp = kbn('POST', '/api/alerting/rule', rule)
+    if status in (200, 201):
+        created += 1
+        rule_id = resp.get('id','') if isinstance(resp, dict) else ''
+        print(f'  Alert rule created: {rule["name"]} (id={rule_id}) ✓')
+    elif status == 409:
+        print(f'  Alert rule exists: {rule["name"]} (skipped)')
+    else:
+        print(f'  WARN: {rule["name"]} HTTP {status}: {str(resp)[:200]}')
+
+print(f'Alert rules created: {created}/{len(RULES)}')
+ALERT_EOF
+
+  echo "PayPal alert rules done ✓"
+else
+  echo "WARN: Skipping alert rules — KIBANA_URL or BASE64 not set"
+fi
+
 # ── Kibana Data View + Dashboard for paypal-otel-logs ────────────────────────
 # Create a data view and a working dashboard so the Elastic Serverless tab
 # shows real PayPal data instead of the broken Fanatics APM dashboard.
