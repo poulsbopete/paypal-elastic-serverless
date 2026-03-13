@@ -753,6 +753,19 @@ REPLACEMENTS = [
     ("trading cards and memorabilia", "merchant payments and checkout"),
     ("Incident Simulator",          "Payment Incident Simulator"),
 
+    # ── Kibana Dashboard names & descriptions ─────────────────────────────────
+    ("Fanatics Collectibles Executive Dashboard",               "PayPal Merchant Observability Executive Dashboard"),
+    ("Fanatics Collectibles Service Health",                    "PayPal Service Health"),
+    ("Fanatics Collectibles APM",                               "PayPal APM"),
+    ("Fanatics Collectibles Infrastructure",                    "PayPal Infrastructure"),
+    ("Fanatics Collectibles Logs",                              "PayPal Logs"),
+    ("Executive overview of Fanatics Collectibles telemetry",
+     "Executive overview of PayPal merchant payments telemetry"),
+    ("service health, APM, NGINX, VPC flows, K8s cluster health",
+     "service health, APM, transaction flows, and infrastructure"),
+    ("NGINX, VPC flows, K8s cluster health",
+     "transaction flows, payment gateway health, and multi-cloud infrastructure"),
+
     # ── Kibana Workflow names ──────────────────────────────────────────────────
     ("Fanatics Collectibles Significant Event Notification",    "PayPal Payment Incident Alert & Notification"),
     ("Fanatics Collectibles Remediation Action",                "PayPal Payment Incident Remediation"),
@@ -802,7 +815,7 @@ except Exception as e:
     print(f"WARN: registry patch: {e}", file=sys.stderr)
 
 # ── Patch all text files ───────────────────────────────────────────────────────
-EXTS = {'.py', '.json', '.yaml', '.yml', '.js', '.html', '.jinja', '.jinja2', '.txt'}
+EXTS = {'.py', '.json', '.yaml', '.yml', '.js', '.html', '.jinja', '.jinja2', '.txt', '.ndjson', '.md'}
 patched_files = []
 for root, dirs, files in os.walk(DEMO_DIR):
     dirs[:] = [d for d in dirs if d not in ('packages', '.git', '__pycache__', 'node_modules')]
