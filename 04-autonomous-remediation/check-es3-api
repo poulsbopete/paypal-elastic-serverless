@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Challenge 4 check: verify all fault channels are resolved (chaos is cleared).
+set -euo pipefail
+
+fail() { echo "❌ $*"; exit 1; }
+pass() { echo "✅ $*"; }
+
+APP="http://localhost:8090"
+
+# ── App healthy ───────────────────────────────────────────────────────────────
+curl -sf "${APP}/health" >/dev/null 2>&1 || fail "Demo app is not responding."
+pass "Demo app is healthy"
+
+# ── Deployment exists ─────────────────────────────────────────────────────────
+DEPS="$(curl -sf "${APP}/api/deployments" 2>/dev/null || echo "[]")"
+DEP_ID="$(echo "$DEPS" | python3 -c "
+import sys, json
+deps = json.load(sys.stdin)
+print(deps[0]['deployment_id'] if deps else '')
+" 2>/dev/null || echo "")"
+
+[[ -n "$DEP_ID" ]] || fail "No active deployment found. Did you complete Challenge 1?"
+pass "Deployment found: $DEP_ID"
+
+# ── All chaos channels are resolved ──────────────────────────────────────────
+CHAOS="$(curl -sf "${APP}/api/chaos/status?deployment_id=${DEP_ID}" 2>/dev/null || echo "{}")"
+
+ACTIVE_CHANNELS="$(echo "$CHAOS" | python3 -c "
+import sys, json
+ch = json.load(sys.stdin)
+active = [k for k,v in ch.items() if isinstance(v,dict) and v.get('state') == 'ACTIVE']
+print(','.join(active) if active else '')
+" 2>/dev/null || echo "")"
+
+if [[ -n "$ACTIVE_CHANNELS" ]]; then
+  fail "Fault channel(s) still active: $ACTIVE_CHANNELS
+
+The Elastic workflow should resolve these automatically within 2-3 minutes of the alert firing.
+If no alert has fired yet, wait a moment — alert rules run on a 30-second interval.
+To resolve from the UI: open the Demo App → Chaos Controller and click RESOLVE on each active channel."
+fi
+
+pass "All fault channels are resolved — no active chaos"
+
+echo ""
+echo "🎉 Congratulations! You've completed the Elastic Autonomous Observability lab."
+echo ""
+echo "   ✓ Connected live OTLP telemetry to Elastic Cloud"
+echo "   ✓ Deployed 9 microservices across 3 cloud providers"
+echo "   ✓ Injected a realistic fault and watched real-time detection"
+echo "   ✓ Witnessed autonomous AI investigation and remediation"
+echo ""
+echo "   The full loop — instrument → detect → investigate → remediate — ran without human intervention."
+exit 0

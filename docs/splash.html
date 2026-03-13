@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PayPal Merchant Observability — Elastic Serverless</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0f1e;
+            color: #e6edf3;
+            min-height: 100vh;
+            overflow-y: auto;
+        }
+        .header {
+            background: linear-gradient(135deg, #003087 0%, #0070ba 100%);
+            padding: 18px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #0058a3;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .header-left h1 { font-size: 18px; font-weight: 700; color: #fff; letter-spacing: -0.3px; }
+        .header-left p { font-size: 12px; color: #a8d4f5; margin-top: 2px; }
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(0,0,0,0.25);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 20px;
+            padding: 6px 14px;
+            font-size: 12px;
+            color: #a8d4f5;
+        }
+        .status-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: #4ade80;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.4;} }
+        .main { max-width: 920px; margin: 0 auto; padding: 28px 20px 48px; }
+        .section-label {
+            font-size: 10px; font-weight: 700; letter-spacing: 2px;
+            text-transform: uppercase; color: #0070ba; margin-bottom: 12px;
+        }
+        .card {
+            background: #111827; border: 1px solid #1f2d44;
+            border-radius: 10px; padding: 22px 26px; margin-bottom: 18px;
+        }
+        .card h2 { font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+        .card p { font-size: 13px; line-height: 1.7; color: #94a3b8; }
+        .card p + p { margin-top: 8px; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
+        th { background: #1a2640; color: #64748b; text-align: left; padding: 9px 12px; font-weight: 600; border-bottom: 1px solid #243353; }
+        td { padding: 9px 12px; border-bottom: 1px solid #1a2640; color: #cbd5e1; vertical-align: top; line-height: 1.5; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #141d2e; }
+        code { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #38bdf8; background: #0a1929; padding: 1px 5px; border-radius: 3px; }
+        .badge {
+            display: inline-block; border-radius: 4px; padding: 2px 8px;
+            font-size: 11px; font-weight: 600; margin-right: 4px; margin-top: 3px;
+        }
+        .badge-red { background: #2a0f0f; color: #f87171; border: 1px solid #4a1a1a; }
+        .badge-green { background: #0a2a1a; color: #4ade80; border: 1px solid #1a4a2a; }
+        .badge-blue { background: #0a1929; color: #38bdf8; border: 1px solid #1a3a55; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+        @media(max-width:600px){ .grid-2 { grid-template-columns: 1fr; } }
+        .mini { background: #0d1829; border: 1px solid #1a2e4a; border-radius: 8px; padding: 13px 15px; }
+        .mini h4 { font-size: 12px; font-weight: 700; color: #e2e8f0; margin-bottom: 5px; }
+        .mini p { font-size: 11px; color: #64748b; line-height: 1.6; }
+        .code-block {
+            background: #0d1117; border: 1px solid #21262d; border-radius: 6px;
+            padding: 13px 15px; font-family: 'JetBrains Mono', monospace;
+            font-size: 11px; color: #e6edf3; margin-top: 12px;
+            overflow-x: auto; white-space: pre; line-height: 1.7;
+        }
+        .kw { color: #ff7b72; } .fn { color: #d2a8ff; }
+        .str { color: #a5d6ff; } .cmt { color: #8b949e; font-style: italic; }
+        .services { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 9px; margin-top: 12px; }
+        .svc { background: #0d1829; border: 1px solid #1a2e4a; border-radius: 7px; padding: 10px 12px; }
+        .svc .name { font-size: 12px; font-weight: 700; color: #38bdf8; font-family: monospace; }
+        .svc .desc { font-size: 11px; color: #64748b; margin-top: 3px; }
+        .svc .cloud { font-size: 10px; color: #475569; margin-top: 5px; font-weight: 600; letter-spacing: 0.3px; }
+        .caps { margin-top: 14px; }
+        .footer { text-align: center; padding: 28px 0 8px; }
+        .footer p { font-size: 12px; color: #64748b; margin-bottom: 14px; }
+        .footer a {
+            background: linear-gradient(135deg, #003087 0%, #0070ba 100%);
+            color: #fff; padding: 12px 32px; border-radius: 7px;
+            font-size: 14px; font-weight: 700; text-decoration: none;
+            display: inline-flex; align-items: center; gap: 8px;
+        }
+        .footer a:hover { opacity: 0.9; }
+    </style>
+</head>
+<body>
+<div class="header">
+    <div class="header-left">
+        <h1>PayPal Merchant Observability</h1>
+        <p>Powered by Elastic Serverless + OpenTelemetry &mdash; your environment is provisioning</p>
+    </div>
+    <div class="status-badge">
+        <div class="status-dot"></div>
+        Environment Provisioning
+    </div>
+</div>
+
+<div class="main">
+
+    <!-- 01 THE PROBLEM -->
+    <div class="section-label">01 &mdash; The Problem</div>
+    <div class="card">
+        <h2>Fragmented Observability at PayPal Scale</h2>
+        <p>PayPal processes billions of transactions across a global multi-cloud platform. Every checkout, authorization, fraud decision, and settlement flows through interdependent microservices — each generating signals that today live in separate silos.</p>
+        <table>
+            <thead><tr><th>Current State</th><th>Operational Impact</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td><span class="badge badge-red">CAL Logging</span> Proprietary schema, early-2000s design</td>
+                    <td>No off-the-shelf tooling interoperability; specialist knowledge required to query</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-red">Siloed Signals</span> Traces, metrics, logs in separate tools</td>
+                    <td>Correlating a merchant complaint to a root cause requires hopping between 3–5 tools</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-red">Cardinality Pressure</span> Millions of merchant IDs, transaction IDs, regions</td>
+                    <td>Metrics backends choke on high-dimensional label combinations at PayPal's volume</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-red">No Trace Context</span> CAL lacks distributed trace propagation</td>
+                    <td>Cross-service incident investigation is manual and error-prone</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-red">Operational Overhead</span> Separate ingest pipelines per signal type</td>
+                    <td>Platform engineering time spent maintaining pipelines, not building capabilities</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- 02 THE SOLUTION -->
+    <div class="section-label">02 &mdash; The Solution</div>
+    <div class="card">
+        <h2>Elastic Serverless + OpenTelemetry: One Platform for All Signals</h2>
+        <p>Elastic Serverless provides a zero-ops observability backend purpose-built for the volume, cardinality, and query complexity that PayPal's platform demands. Combined with OpenTelemetry as the instrumentation standard, it replaces the fragmented tool landscape with a single unified destination.</p>
+        <div class="grid-2">
+            <div class="mini">
+                <h4>No Cluster Management</h4>
+                <p>No shard sizing, no JVM tuning, no rolling restarts. Provision a complete Observability project in under 60 seconds.</p>
+            </div>
+            <div class="mini">
+                <h4>Native OTLP Ingestion</h4>
+                <p>Services ship logs, metrics, and traces directly via OTLP gRPC or HTTP. No Collector required in the data path.</p>
+            </div>
+            <div class="mini">
+                <h4>Unified Correlation</h4>
+                <p>Every signal shares <code>trace.id</code>, <code>merchant.id</code>, and <code>transaction.id</code> — one field pivots a merchant complaint to full telemetry.</p>
+            </div>
+            <div class="mini">
+                <h4>Built-in AI Assistant</h4>
+                <p>Every project includes an Elastic AI Assistant with live access to your telemetry — no data export, no separate AI tooling.</p>
+            </div>
+            <div class="mini">
+                <h4>Cardinality at Scale</h4>
+                <p>Elastic's data tier architecture handles high-dimensional metric label combinations that overwhelm traditional TSDB backends.</p>
+            </div>
+            <div class="mini">
+                <h4>Autonomous Remediation</h4>
+                <p>Elastic Workflows trigger automated playbooks — alert → investigate → remediate — without human intervention at 3 AM.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 03 CAL REPLACEMENT -->
+    <div class="section-label">03 &mdash; CAL Log Replacement</div>
+    <div class="card">
+        <h2>From CAL to OpenTelemetry Semantic Conventions</h2>
+        <p>The goal is not just "logs in a new place." It's a shared schema understood by every service, every tool, and every engineer — no custom parsers, no proprietary adapters.</p>
+        <table>
+            <thead><tr><th>CAL Field</th><th>OTel Semantic Convention</th><th>Value Gained</th></tr></thead>
+            <tbody>
+                <tr><td><code>CAL_TYPE</code></td><td><code>service.name</code></td><td>Standard across all CNCF tooling; automatic service map grouping</td></tr>
+                <tr><td><code>CAL_MODULE</code></td><td><code>service.namespace</code></td><td>Native subsystem grouping in Kibana service maps</td></tr>
+                <tr><td><code>TXN_ID</code></td><td><code>transaction.id</code> / <code>trace.id</code></td><td>Automatic distributed trace correlation across all services</td></tr>
+                <tr><td><code>MERCHANT_ID</code></td><td><code>merchant.id</code> (custom attribute)</td><td>Pivot any signal — log, metric, trace — by merchant in a single field</td></tr>
+                <tr><td><code>STATUS</code></td><td><code>http.response.status_code</code></td><td>Automatic SLO computation and error rate alerting</td></tr>
+                <tr><td><code>DURATION_MS</code></td><td><code>duration</code> (span attribute)</td><td>Native latency percentile histograms with no pre-aggregation</td></tr>
+                <tr><td><em>No equivalent</em></td><td><code>deployment.environment</code>, <code>cloud.region</code></td><td>Infrastructure and deployment context baked into every signal</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- 04 ESQL -->
+    <div class="section-label">04 &mdash; ES|QL at Merchant Scale</div>
+    <div class="card">
+        <h2>One Query Language Across All Signals — No Splunk SPL, No PromQL</h2>
+        <p>ES|QL is a pipe-based query language purpose-built for high-volume telemetry. Every investigation — from a merchant complaint to a production incident — uses the same syntax across logs, metrics, and traces.</p>
+        <div class="code-block"><span class="cmt">-- Which services are failing for a specific merchant?</span>
+<span class="kw">FROM</span> logs.otel
+<span class="kw">| WHERE</span> merchant.id == <span class="str">"M-98231"</span> <span class="kw">AND</span> severity_text == <span class="str">"ERROR"</span>
+<span class="kw">| STATS</span> errors = <span class="fn">COUNT</span>(*) <span class="kw">BY</span> service.name
+<span class="kw">| SORT</span> errors <span class="kw">DESC</span></div>
+        <div class="code-block"><span class="cmt">-- P99 checkout latency by merchant tier and cloud region</span>
+<span class="kw">FROM</span> metrics-*
+<span class="kw">| WHERE</span> @timestamp > <span class="fn">NOW</span>() - <span class="str">15 MINUTES</span>
+  <span class="kw">AND</span> service.name == <span class="str">"checkout-service"</span>
+<span class="kw">| STATS</span> p99 = <span class="fn">PERCENTILE</span>(transaction.duration, 99) <span class="kw">BY</span> merchant.tier, cloud.region
+<span class="kw">| SORT</span> p99 <span class="kw">DESC</span></div>
+        <div class="code-block"><span class="cmt">-- Trace all service hops for a single transaction</span>
+<span class="kw">FROM</span> traces-*
+<span class="kw">| WHERE</span> transaction.id == <span class="str">"TXN-44821903"</span>
+<span class="kw">| STATS</span> spans = <span class="fn">COUNT</span>(*), errors = <span class="fn">COUNT_IF</span>(error == <span class="kw">true</span>)
+    <span class="kw">BY</span> service.name
+<span class="kw">| SORT</span> spans <span class="kw">DESC</span></div>
+    </div>
+
+    <!-- 05 SERVICES -->
+    <div class="section-label">05 &mdash; What You'll Explore in This Lab</div>
+    <div class="card">
+        <h2>7 PayPal Microservices — Live Telemetry Flowing to Elastic Serverless</h2>
+        <p>All 7 services are provisioning now, emitting logs, metrics, and traces via OTLP to your Elastic Serverless Observability project. When loading completes, click the <strong style="color:#38bdf8">Elastic Serverless</strong> tab or the button below to open Kibana.</p>
+        <div class="services">
+            <div class="svc">
+                <div class="name">merchant-api</div>
+                <div class="desc">Merchant profile, settings, token validation</div>
+                <div class="cloud">AWS &middot; us-east-1</div>
+            </div>
+            <div class="svc">
+                <div class="name">checkout-service</div>
+                <div class="desc">Checkout session orchestration</div>
+                <div class="cloud">AWS &middot; us-east-1</div>
+            </div>
+            <div class="svc">
+                <div class="name">payments-orchestrator</div>
+                <div class="desc">Payment routing and processing</div>
+                <div class="cloud">AWS &middot; us-east-1</div>
+            </div>
+            <div class="svc">
+                <div class="name">fraud-decisioning</div>
+                <div class="desc">Real-time fraud scoring</div>
+                <div class="cloud">GCP &middot; us-central1</div>
+            </div>
+            <div class="svc">
+                <div class="name">settlement-service</div>
+                <div class="desc">Settlement batch processing</div>
+                <div class="cloud">GCP &middot; us-central1</div>
+            </div>
+            <div class="svc">
+                <div class="name">merchant-support-api</div>
+                <div class="desc">Support tickets, account management</div>
+                <div class="cloud">Azure &middot; eastus</div>
+            </div>
+            <div class="svc">
+                <div class="name">notification-service</div>
+                <div class="desc">Email, push, and webhook delivery</div>
+                <div class="cloud">Azure &middot; eastus</div>
+            </div>
+        </div>
+        <div class="caps">
+            <span class="badge badge-green">ES|QL Alert Rules</span>
+            <span class="badge badge-green">AI Investigation Agent</span>
+            <span class="badge badge-green">Autonomous Workflows</span>
+            <span class="badge badge-green">Merchant Dashboards</span>
+            <span class="badge badge-green">Service Maps</span>
+            <span class="badge badge-green">Anomaly Detection</span>
+            <span class="badge badge-blue">OpenTelemetry Native</span>
+            <span class="badge badge-blue">Zero-Ops Serverless</span>
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>Your environment will be ready in a few minutes. Click below once loading completes.</p>
+        <a href="javascript:window.location.href='/app/dashboards#/list?_g=(filters:!(),refreshInterval:(pause:!f,value:30000),time:(from:now-30m,to:now))'">
+            Open Kibana Dashboards &rarr;
+        </a>
+    </div>
+
+</div>
+</body>
+</html>

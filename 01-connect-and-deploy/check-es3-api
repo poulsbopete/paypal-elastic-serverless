@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Challenge 1 check: verify a scenario has been successfully deployed.
+set -euo pipefail
+
+fail() { echo "❌ $*"; exit 1; }
+pass() { echo "✅ $*"; }
+
+APP="http://localhost:8090"
+
+# ── 1. App is healthy ─────────────────────────────────────────────────────────
+if ! curl -sf "${APP}/health" >/dev/null 2>&1; then
+  fail "Demo app is not responding on port 80. Check: journalctl -u elastic-demo"
+fi
+pass "Demo app is healthy"
+
+# ── 2. At least one active deployment exists ──────────────────────────────────
+DEPLOYMENTS="$(curl -sf "${APP}/api/deployments" 2>/dev/null || echo "[]")"
+
+if ! command -v jq >/dev/null 2>&1; then
+  apt-get -yqq install --no-install-recommends jq >/dev/null 2>&1
+fi
+
+COUNT="$(echo "$DEPLOYMENTS" | jq 'length' 2>/dev/null || echo "0")"
+
+if [[ "$COUNT" -lt 1 ]]; then
+  fail "No active deployments found. Open the Demo App tab, enter your Elastic credentials, choose a scenario, and click Launch."
+fi
+pass "Found $COUNT active deployment(s)"
+
+# ── 3. The deployment is running (not stopped/errored) ────────────────────────
+RUNNING="$(echo "$DEPLOYMENTS" | jq '[.[] | select(.running == true)] | length' 2>/dev/null || echo "0")"
+
+if [[ "$RUNNING" -lt 1 ]]; then
+  fail "Deployment exists but is not running. Return to the Demo App and check the deployment status."
+fi
+pass "Deployment is active and sending telemetry"
+
+# ── 4. Kibana URL is configured (proxy test to ES) ───────────────────────────
+KIBANA_URL="$(echo "$DEPLOYMENTS" | jq -r '.[0].kibana_url // ""' 2>/dev/null || echo "")"
+
+if [[ -z "$KIBANA_URL" ]]; then
+  fail "Deployment has no Kibana URL — the launch may not have completed. Wait a moment and try again."
+fi
+pass "Kibana URL configured: ${KIBANA_URL}"
+
+echo ""
+echo "🎉 Deployment confirmed! Your scenario is running and sending telemetry to Elastic."
+echo "   Open Kibana at: ${KIBANA_URL}"
+echo "   Then proceed to the next challenge to explore live telemetry."
+exit 0

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Challenge 1 setup: verify the app is healthy before handing off to learner.
+set -euo pipefail
+
+log()  { printf "[ch1-setup] %s\n" "$*"; }
+
+# Confirm the app is running (track_scripts/setup-host01 started it, but be safe)
+for i in $(seq 1 30); do
+  if curl -sf http://localhost:8090/health >/dev/null 2>&1; then
+    log "App healthy ✓"
+    exit 0
+  fi
+  sleep 2
+done
+
+log "App not healthy after 60s — attempting restart..."
+systemctl restart elastic-demo
+sleep 5
+
+if curl -sf http://localhost:8090/health >/dev/null 2>&1; then
+  log "App healthy after restart ✓"
+else
+  log "ERROR: App still not healthy. Check: journalctl -u elastic-demo"
+  exit 1
+fi

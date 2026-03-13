@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Challenge 3 setup: ensure no stale chaos state from a previous attempt.
+set -euo pipefail
+
+log() { printf "[ch3-setup] %s\n" "$*"; }
+
+DEPS="$(curl -sf http://localhost:8090/api/deployments 2>/dev/null || echo "[]")"
+COUNT="$(echo "$DEPS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")"
+
+if [[ "$COUNT" -lt 1 ]]; then
+  log "WARNING: No active deployments. Learner may need to redo Challenge 1."
+  exit 0
+fi
+
+# Resolve any channels that were left active from a previous attempt
+DEP_ID="$(echo "$DEPS" | python3 -c "import sys,json; deps=json.load(sys.stdin); print(deps[0]['deployment_id'] if deps else '')" 2>/dev/null || echo "")"
+
+if [[ -n "$DEP_ID" ]]; then
+  CHAOS="$(curl -sf "http://localhost:8090/api/chaos/status?deployment_id=$DEP_ID" 2>/dev/null || echo "{}")"
+  ACTIVE_COUNT="$(echo "$CHAOS" | python3 -c "
+import sys, json
+ch = json.load(sys.stdin)
+print(sum(1 for v in ch.values() if isinstance(v,dict) and v.get('active')))
+" 2>/dev/null || echo "0")"
+
+  if [[ "$ACTIVE_COUNT" -gt 0 ]]; then
+    log "Resolving $ACTIVE_COUNT stale chaos channel(s) from previous attempt..."
+    for ch in $(seq 1 20); do
+      curl -sf -X POST http://localhost:8090/api/chaos/resolve \
+        -H 'Content-Type: application/json' \
+        -d "{\"deployment_id\":\"$DEP_ID\",\"channel\":$ch}" >/dev/null 2>&1 || true
+    done
+    sleep 2
+    log "Stale channels resolved."
+  fi
+fi
+
+log "Challenge 3 setup complete."

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Challenge 2 solve: nothing to do programmatically — just verify state is correct.
+set -euo pipefail
+
+DEPS="$(curl -sf http://localhost:8090/api/deployments 2>/dev/null || echo "[]")"
+COUNT="$(echo "$DEPS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")"
+
+if [[ "$COUNT" -lt 1 ]]; then
+  echo "[ch2-solve] WARNING: No active deployments. This challenge requires a running deployment from Challenge 1."
+  exit 1
+fi
+
+echo "[ch2-solve] Deployment confirmed active. Challenge 2 passed."

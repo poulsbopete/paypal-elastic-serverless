@@ -1,0 +1,32 @@
+slug: paypal-elastic-serverless
+id: 1tpbmpeq2nao
+title: 'PayPal Merchant Observability: Elastic Serverless + OpenTelemetry'
+description: Experience how Elastic Serverless + OpenTelemetry replaces CAL logging,
+  unifies merchant-centric observability, and enables autonomous incident response
+  at PayPal scale.
+icon: ""
+tags:
+- co.elastic.workshops.production
+- cal-replacement
+- ai
+- opentelemetry
+- serverless
+- paypal
+- observability
+- co.elastic.workshops
+owner: elastic
+developers:
+- peter.simkins@elastic.co
+idle_timeout: 3600
+timelimit: 10800
+lab_config:
+  sidebar_enabled: true
+  feedback_recap_enabled: true
+  feedback_tab_enabled: false
+  loadingMessages: true
+  theme:
+    name: modern-dark
+  override_challenge_layout: false
+  hideStopButton: false
+checksum: "7295759845783996381"
+enhanced_loading: false

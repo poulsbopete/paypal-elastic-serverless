@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Challenge 2 setup: nothing extra needed — telemetry is already flowing.
+set -euo pipefail
+
+# Verify deployment is still active
+DEPS="$(curl -sf http://localhost:8090/api/deployments 2>/dev/null || echo "[]")"
+COUNT="$(echo "$DEPS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")"
+
+if [[ "$COUNT" -lt 1 ]]; then
+  echo "[ch2-setup] WARNING: No active deployments found. The previous challenge may not have completed."
+fi
+
+echo "[ch2-setup] Setup complete. $COUNT active deployment(s) found."

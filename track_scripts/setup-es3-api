@@ -1,0 +1,907 @@
+#!/bin/bash
+
+# Debug: Show what environment variables are available
+echo "=== Debug: Checking for API key ==="
+echo "PME_CLOUD_INSTRUQT_API_KEY: ${PME_CLOUD_INSTRUQT_API_KEY:-<not set>}"
+echo "ESS_CLOUD_API_KEY: ${ESS_CLOUD_API_KEY:-<not set>}"
+echo "All env vars containing 'API' or 'KEY':"
+env | grep -i -E "(API|KEY)" || echo "No API/KEY variables found"
+echo "===================================="
+
+# Try to get API key from multiple sources
+# First check PME_CLOUD_INSTRUQT_API_KEY (may be set via config.yml mapping)
+# Then check ESS_CLOUD_API_KEY (the actual secret name in Instruqt)
+if [ -z "${PME_CLOUD_INSTRUQT_API_KEY:-}" ]; then
+    # Try ESS_CLOUD_API_KEY (the actual secret name)
+    PME_CLOUD_INSTRUQT_API_KEY="${ESS_CLOUD_API_KEY:-}"
+fi
+
+if [ -z "${PME_CLOUD_INSTRUQT_API_KEY:-}" ]; then
+    # Try to get from agent variables as fallback
+    PME_CLOUD_INSTRUQT_API_KEY=$(agent variable get PME_CLOUD_INSTRUQT_API_KEY 2>/dev/null || echo "")
+fi
+
+if [ -z "${PME_CLOUD_INSTRUQT_API_KEY:-}" ]; then
+    # Try ESS_CLOUD_API_KEY from agent variables
+    ESS_KEY=$(agent variable get ESS_CLOUD_API_KEY 2>/dev/null || echo "")
+    if [ -n "$ESS_KEY" ]; then
+        PME_CLOUD_INSTRUQT_API_KEY="$ESS_KEY"
+    fi
+fi
+
+# Check for required environment variables BEFORE enabling strict mode
+if [ -z "${PME_CLOUD_INSTRUQT_API_KEY:-}" ]; then
+    echo "ERROR: API key is not set"
+    echo ""
+    echo "This variable is required to create serverless observability projects."
+    echo "Expected secret name in Instruqt: ESS_CLOUD_API_KEY"
+    echo ""
+    echo "Debug information:"
+    echo "  - Checked PME_CLOUD_INSTRUQT_API_KEY env var: ${PME_CLOUD_INSTRUQT_API_KEY:-not found}"
+    echo "  - Checked ESS_CLOUD_API_KEY env var: ${ESS_CLOUD_API_KEY:-not found}"
+    echo "  - Checked agent variables for both names: not found"
+    echo ""
+    echo "To fix this:"
+    echo "1. Go to your Instruqt track settings (Sandbox > Secrets)"
+    echo "2. Ensure ESS_CLOUD_API_KEY secret is configured with your Elastic Cloud API key"
+    echo "3. The secret should be automatically available to all VMs"
+    echo "4. If not auto-available, you may need to map it in the es3-api VM's environment variables"
+    echo ""
+    echo "The API key is used to create Elastic Cloud serverless projects via the es3-api."
+    exit 1
+fi
+
+# Export for use in the script
+export PME_CLOUD_INSTRUQT_API_KEY
+
+set -euxo pipefail
+
+echo "Running track setup script on host es3-api"
+
+# Wait for the Instruqt host bootstrap to finish
+until [ -f /opt/instruqt/bootstrap/host-bootstrap-completed ]
+do
+    sleep 1
+done
+
+echo "Project type: ${PROJECT_TYPE:-}"
+echo "Regions: ${REGIONS:-}"
+
+case "$PROJECT_TYPE" in
+    "observability")
+      PRODUCT_TIER="${PRODUCT_TIER:-complete}"
+      echo "Project Tier: $PRODUCT_TIER"
+      python3 bin/es3-api.py \
+        --operation create \
+        --project-type $PROJECT_TYPE \
+        --product-tier $PRODUCT_TIER \
+        --regions $REGIONS \
+        --project-name $INSTRUQT_TRACK_SLUG-$INSTRUQT_PARTICIPANT_ID-`date '+%s'` \
+        --api-key "${PME_CLOUD_INSTRUQT_API_KEY}" \
+        --wait-for-ready
+        ;;
+    "elasticsearch")
+      OPTIMIZED_FOR="${OPTIMIZED_FOR:-general_purpose}"
+      echo "Optimized for: $OPTIMIZED_FOR"
+      python3 bin/es3-api.py \
+        --operation create \
+        --project-type $PROJECT_TYPE \
+        --optimized-for $OPTIMIZED_FOR \
+        --regions $REGIONS \
+        --project-name $INSTRUQT_TRACK_SLUG-$INSTRUQT_PARTICIPANT_ID-`date '+%s'` \
+        --api-key "${PME_CLOUD_INSTRUQT_API_KEY}" \
+        --wait-for-ready
+        ;;
+    "security")
+      python3 bin/es3-api.py \
+        --operation create \
+        --project-type $PROJECT_TYPE \
+        --regions $REGIONS \
+        --project-name $INSTRUQT_TRACK_SLUG-$INSTRUQT_PARTICIPANT_ID-`date '+%s'` \
+        --api-key "${PME_CLOUD_INSTRUQT_API_KEY}" \
+        --wait-for-ready
+        ;;
+    *)
+        echo "Error: Unknown project type '$PROJECT_TYPE'"
+        exit 1
+        ;;
+esac
+
+timeout=20
+counter=0
+
+while [ $counter -lt $timeout ]; do
+    if [ -f "/tmp/project_results.json" ]; then
+        echo "File found, continuing..."
+        break
+    fi
+
+    echo "Waiting for file /tmp/project_results.json... ($((counter + 1))/$timeout seconds)"
+    sleep 1
+    counter=$((counter + 1))
+done
+
+# Check if we timed out
+if [ $counter -eq $timeout ]; then
+    echo "Timeout: File /tmp/project_results.json not found after $timeout seconds"
+    exit 1
+fi
+
+export KIBANA_URL=`jq -r --arg region "$REGIONS" '.[$region].endpoints.kibana' /tmp/project_results.json`
+export ELASTICSEARCH_PASSWORD=`jq -r --arg region "$REGIONS" '.[$region].credentials.password' /tmp/project_results.json`
+export ES_URL=`jq -r --arg region "$REGIONS" '.[$region].endpoints.elasticsearch' /tmp/project_results.json`
+
+agent variable set ES_KIBANA_URL `jq -r --arg region "$REGIONS" '.[$region].endpoints.kibana' /tmp/project_results.json`
+agent variable set ES_URL `jq -r --arg region "$REGIONS" '.[$region].endpoints.elasticsearch' /tmp/project_results.json`
+agent variable set ES_USERNAME `jq -r --arg region "$REGIONS" '.[$region].credentials.username'  /tmp/project_results.json`
+agent variable set ES_PASSWORD `jq -r --arg region "$REGIONS" '.[$region].credentials.password' /tmp/project_results.json`
+agent variable set ES_DEPLOYMENT_ID `jq -r --arg region "$REGIONS" '.[$region].id' /tmp/project_results.json`
+
+BASE64=$(echo -n "admin:${ELASTICSEARCH_PASSWORD}" | base64)
+KIBANA_URL_WITHOUT_PROTOCOL=$(echo $KIBANA_URL | sed -e 's#http[s]\?://##g')
+
+
+echo "Generating API Key"
+output=$(curl -X POST -s -u "admin:${ELASTICSEARCH_PASSWORD}" \
+  -w "\n%{http_code}" \
+  $ES_URL/_security/api_key \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "collector"}')
+
+# Extract HTTP status code and response body
+http_code=$(echo "$output" | tail -n1)
+response_body=$(echo "$output" | sed '$d')
+
+# Check if the API call was successful
+if [ "$http_code" != "200" ]; then
+  echo "Error: Failed to generate API key. HTTP status: $http_code"
+  echo "Response: $response_body"
+  #exit 1
+fi
+
+# Extract API key and validate it exists
+ELASTICSEARCH_API_KEY=$(echo "$response_body" | jq -r '.encoded // empty')
+if [ -z "$ELASTICSEARCH_API_KEY" ]; then
+  echo "Error: Failed to extract API key from response"
+  echo "Response: $response_body"
+  #exit 1
+fi
+
+echo "API Key generated successfully"
+
+# Set API key in agent variables for easy access
+agent variable set ES_API_KEY "$ELASTICSEARCH_API_KEY"
+agent variable set ELASTIC_API_KEY "$ELASTICSEARCH_API_KEY"
+
+# Update the JSON file with general api_key (with proper path creation)
+if ! jq --arg region "$REGIONS" --arg apikey "$ELASTICSEARCH_API_KEY" \
+  '.[$region] = (.[$region] // {}) |
+   .[$region].credentials = (.[$region].credentials // {}) |
+   .[$region].credentials.api_key = $apikey' \
+  /tmp/project_results.json > /tmp/project_results.json.tmp; then
+  echo "Error: Failed to update JSON with API key"
+  #exit 1
+fi
+mv /tmp/project_results.json.tmp /tmp/project_results.json
+
+# Fetch the Fleet Server URL(s)
+if [ "$PROJECT_TYPE" = 'observability' ]; then
+  echo "Fetching Fleet Server URL"
+
+  fleet_output=$(curl -s -u "admin:$ELASTICSEARCH_PASSWORD" \
+    -w "\n%{http_code}" \
+    -H "kbn-xsrf: true" \
+    "$KIBANA_URL/api/fleet/fleet_server_hosts")
+
+  # Extract HTTP status code and response body
+  fleet_http_code=$(echo "$fleet_output" | tail -n1)
+  fleet_response=$(echo "$fleet_output" | sed '$d')
+
+  # Check if the Fleet API call was successful
+  if [ "$fleet_http_code" != "200" ]; then
+    echo "Warning: Failed to fetch Fleet Server URL. HTTP status: $fleet_http_code"
+    echo "Response: $fleet_response"
+    # Continue without fleet URL rather than exiting
+  else
+    # Extract Fleet URL and validate
+    FLEET_URL=$(echo "$fleet_response" | jq -r '.items[0].host_urls[0] // empty')
+
+    if [ -z "$FLEET_URL" ]; then
+      echo "Warning: No Fleet Server URL found in response"
+    else
+      echo "Fleet URL: $FLEET_URL"
+
+      # Update the JSON file with the Fleet URL
+      if ! jq --arg region "$REGIONS" --arg fleet "$FLEET_URL" \
+        '.[$region].endpoints = (.[$region].endpoints // {}) |
+         .[$region].endpoints.fleet = $fleet' \
+        /tmp/project_results.json > /tmp/project_results.json.tmp; then
+        echo "Error: Failed to update JSON with Fleet URL"
+        #exit 1
+      fi
+      mv /tmp/project_results.json.tmp /tmp/project_results.json
+    fi
+  fi
+fi
+
+echo "Configuration saved successfully to /tmp/project_results.json"
+
+echo "Configure NGINX"
+# Create directory for static files
+mkdir -p /usr/share/nginx/html/loading
+mkdir -p /usr/share/nginx/html/chatbot
+
+# Create HTML file with iframe for interactive content during loading
+cat > /usr/share/nginx/html/loading/index.html < /tmp/splash.html
+# splash.html is written by setup from the track's docs/ — fall back to inline if missing
+if [ ! -s /usr/share/nginx/html/loading/index.html ]; then
+cat > /usr/share/nginx/html/loading/index.html <<'HTML_EOF'
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>PayPal Merchant Observability</title>
+<style>body{margin:0;font-family:system-ui,sans-serif;background:#0a0f1e;color:#e6edf3;padding:40px 32px}
+h1{font-size:20px;color:#fff;background:linear-gradient(135deg,#003087,#0070ba);padding:18px 24px;margin:-40px -32px 32px;border-radius:0}
+h2{font-size:15px;color:#38bdf8;margin:24px 0 8px}.card{background:#111827;border:1px solid #1f2d44;border-radius:8px;padding:18px 22px;margin-bottom:16px}
+p{font-size:13px;line-height:1.7;color:#94a3b8}a.btn{display:inline-block;margin-top:24px;background:linear-gradient(135deg,#003087,#0070ba);color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:700}
+</style></head><body>
+<h1>PayPal Merchant Observability &mdash; Elastic Serverless + OpenTelemetry</h1>
+<div class="card"><h2>The Problem</h2><p>CAL logging is proprietary and siloed. Traces, metrics, and logs live in separate tools. Correlating a merchant complaint to root cause requires hopping between 3–5 systems. High-cardinality metrics (merchant IDs, transaction IDs) overwhelm traditional backends.</p></div>
+<div class="card"><h2>The Solution</h2><p>Elastic Serverless + OpenTelemetry replaces CAL with a vendor-neutral schema, unifies all signals in one platform, and handles PayPal-scale cardinality. Zero cluster management. Native OTLP. Built-in AI Assistant. Autonomous remediation workflows.</p></div>
+<div class="card"><h2>CAL → OTel Mapping</h2><p>CAL_TYPE → service.name &nbsp;|&nbsp; TXN_ID → trace.id &nbsp;|&nbsp; MERCHANT_ID → merchant.id &nbsp;|&nbsp; DURATION_MS → span duration &nbsp;|&nbsp; STATUS → http.response.status_code</p></div>
+<div class="card"><h2>ES|QL at Merchant Scale</h2><p>One query language across logs, metrics, and traces:<br><code style="color:#38bdf8">FROM logs.otel | WHERE merchant.id == "M-98231" AND severity_text == "ERROR" | STATS errors = COUNT(*) BY service.name</code></p></div>
+<div class="card"><h2>7 Services Running Now</h2><p>merchant-api · checkout-service · payments-orchestrator · fraud-decisioning · settlement-service · merchant-support-api · notification-service — all emitting live OTLP telemetry to your Elastic Serverless project.</p></div>
+<a class="btn" href="/app/dashboards#/list?_g=(filters:!(),refreshInterval:(pause:!f,value:30000),time:(from:now-30m,to:now))">Open Kibana Dashboards &rarr;</a>
+</body></html>
+HTML_EOF
+fi
+
+# Create chatbot HTML page with Elastic MCP integration
+cat > /usr/share/nginx/html/chatbot/index.html <<'CHATBOT_EOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Assistant</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+            background: #1a1a1a; 
+            color: #ffffff; 
+            height: 100vh; 
+            display: flex; 
+            flex-direction: column; 
+        }
+        .header { 
+            background: #2d2d2d; 
+            padding: 15px 20px; 
+            border-bottom: 1px solid #404040; 
+        }
+        .header h1 { 
+            font-size: 18px; 
+            font-weight: 600; 
+            color: #ffffff; 
+        }
+        .chat-container { 
+            flex: 1; 
+            display: flex; 
+            flex-direction: column; 
+            overflow: hidden; 
+        }
+        .messages { 
+            flex: 1; 
+            overflow-y: auto; 
+            padding: 20px; 
+            background: #1a1a1a; 
+        }
+        .message { 
+            margin-bottom: 15px; 
+            padding: 12px 16px; 
+            border-radius: 8px; 
+            max-width: 80%; 
+            word-wrap: break-word; 
+        }
+        .message.user { 
+            background: #4CAF50; 
+            color: white; 
+            margin-left: auto; 
+            text-align: right; 
+        }
+        .message.assistant { 
+            background: #2d2d2d; 
+            color: #ffffff; 
+            border: 1px solid #404040; 
+        }
+        .message.error { 
+            background: #d32f2f; 
+            color: white; 
+        }
+        .input-container { 
+            padding: 15px 20px; 
+            background: #2d2d2d; 
+            border-top: 1px solid #404040; 
+            display: flex; 
+            gap: 10px; 
+        }
+        .input-container input { 
+            flex: 1; 
+            padding: 12px 16px; 
+            background: #1a1a1a; 
+            border: 1px solid #404040; 
+            border-radius: 8px; 
+            color: #ffffff; 
+            font-size: 14px; 
+        }
+        .input-container input:focus { 
+            outline: none; 
+            border-color: #4CAF50; 
+        }
+        .input-container button { 
+            padding: 12px 24px; 
+            background: #4CAF50; 
+            color: white; 
+            border: none; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            font-size: 14px; 
+            font-weight: 600; 
+        }
+        .input-container button:hover { 
+            background: #45a049; 
+        }
+        .input-container button:disabled { 
+            background: #404040; 
+            cursor: not-allowed; 
+        }
+        .loading { 
+            display: inline-block; 
+            width: 12px; 
+            height: 12px; 
+            border: 2px solid #ffffff; 
+            border-top-color: transparent; 
+            border-radius: 50%; 
+            animation: spin 0.8s linear infinite; 
+        }
+        @keyframes spin { 
+            to { transform: rotate(360deg); } 
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>AI Assistant - OpenTelemetry & Metric Shaping</h1>
+    </div>
+    <div class="chat-container">
+        <div class="messages" id="messages">
+            <div class="message assistant">
+                <p>Hello! I'm your AI assistant. I can help you with questions about OpenTelemetry, metric shaping, Elastic Observability, or this demo. What would you like to know?</p>
+            </div>
+        </div>
+        <div class="input-container">
+            <input type="text" id="userInput" placeholder="Ask a question..." autocomplete="off">
+            <button id="sendButton" onclick="sendMessage()">Send</button>
+        </div>
+    </div>
+    <script>
+        const MCP_ENDPOINT = 'https://ai-assistants-ffcafb.kb.us-east-1.aws.elastic.cloud/api/agent_builder/mcp';
+        const API_KEY = 'SFBCQzlac0JBUENqajRQVTJ5VTM6WjRmYnhvWF9hdnM3aXNMZEpFUWlmZw==';
+        const messagesDiv = document.getElementById('messages');
+        const userInput = document.getElementById('userInput');
+        const sendButton = document.getElementById('sendButton');
+
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        function addMessage(text, type) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            messageDiv.innerHTML = `<p>${text}</p>`;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const message = userInput.value.trim();
+            if (!message) return;
+
+            // Add user message
+            addMessage(message, 'user');
+            userInput.value = '';
+            sendButton.disabled = true;
+            sendButton.innerHTML = '<span class="loading"></span>';
+
+            // Add loading message
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'message assistant';
+            loadingDiv.id = 'loading-message';
+            loadingDiv.innerHTML = '<p><span class="loading"></span> Thinking...</p>';
+            messagesDiv.appendChild(loadingDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+            try {
+                // Try MCP JSON-RPC protocol first
+                let response = await fetch('/mcp-proxy', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        method: 'tools/call',
+                        params: {
+                            name: 'chat',
+                            arguments: {
+                                message: message
+                            }
+                        },
+                        id: Date.now()
+                    })
+                });
+
+                // If that fails, try a simpler format
+                if (!response.ok) {
+                    response = await fetch('/mcp-proxy', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            message: message
+                        })
+                    });
+                }
+
+                const data = await response.json();
+                
+                // Remove loading message
+                const loadingMsg = document.getElementById('loading-message');
+                if (loadingMsg) loadingMsg.remove();
+
+                // Handle different response formats
+                let responseText = '';
+                if (data.error) {
+                    addMessage(`Error: ${data.error.message || 'Failed to get response'}`, 'error');
+                    return;
+                } else if (data.result) {
+                    responseText = data.result.content || data.result.text || data.result.message || JSON.stringify(data.result);
+                } else if (data.content) {
+                    responseText = data.content;
+                } else if (data.text) {
+                    responseText = data.text;
+                } else if (data.message) {
+                    responseText = data.message;
+                } else if (typeof data === 'string') {
+                    responseText = data;
+                } else {
+                    responseText = JSON.stringify(data);
+                }
+
+                if (responseText) {
+                    addMessage(responseText, 'assistant');
+                } else {
+                    addMessage('Received an empty response. Please try again.', 'error');
+                }
+            } catch (error) {
+                // Remove loading message
+                const loadingMsg = document.getElementById('loading-message');
+                if (loadingMsg) loadingMsg.remove();
+
+                addMessage(`Error: ${error.message}. Please try again.`, 'error');
+            } finally {
+                sendButton.disabled = false;
+                sendButton.innerHTML = 'Send';
+                userInput.focus();
+            }
+        }
+    </script>
+</body>
+</html>
+CHATBOT_EOF
+
+# Configure nginx
+echo '
+server {
+  listen 8080 default_server;
+  server_name kibana;
+  location /nginx_status {
+    stub_status on;
+    allow 127.0.0.1;
+    deny all;
+  }
+  location /loading {
+    alias /usr/share/nginx/html/loading;
+    index index.html;
+    try_files $uri $uri/ /loading/index.html;
+    add_header X-Frame-Options "SAMEORIGIN";
+  }
+  location /chatbot {
+    alias /usr/share/nginx/html/chatbot;
+    index index.html;
+    try_files $uri $uri/ /chatbot/index.html;
+    add_header Access-Control-Allow-Origin "*" always;
+    add_header Access-Control-Allow-Methods "GET, POST, OPTIONS" always;
+    add_header Access-Control-Allow-Headers "Content-Type, Authorization" always;
+    # Remove X-Frame-Options to allow iframe embedding
+    # (or we could set it to empty, but removing is cleaner)
+  }
+  location /metric-bot {
+    proxy_pass https://metric-bot.vercel.app/;
+    proxy_set_header Host metric-bot.vercel.app;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_ssl_verify off;
+    add_header Access-Control-Allow-Origin "*" always;
+    add_header Access-Control-Allow-Methods "GET, POST, OPTIONS" always;
+    add_header Access-Control-Allow-Headers "Content-Type, Authorization" always;
+    # Remove X-Frame-Options to allow embedding
+    proxy_hide_header X-Frame-Options;
+    
+    # Handle CORS preflight
+    if ($request_method = OPTIONS) {
+      add_header Access-Control-Allow-Origin "*";
+      add_header Access-Control-Allow-Methods "GET, POST, OPTIONS";
+      add_header Access-Control-Allow-Headers "Content-Type, Authorization";
+      add_header Content-Length 0;
+      add_header Content-Type text/plain;
+      return 204;
+    }
+  }
+  location /mcp-proxy {
+    proxy_pass https://ai-assistants-ffcafb.kb.us-east-1.aws.elastic.cloud/api/agent_builder/mcp;
+    proxy_set_header Authorization "ApiKey SFBCQzlac0JBUENqajRQVTJ5VTM6WjRmYnhvWF9hdnM3aXNMZEpFUWlmZw==";
+    proxy_set_header Content-Type "application/json";
+    proxy_set_header Host ai-assistants-ffcafb.kb.us-east-1.aws.elastic.cloud;
+    proxy_ssl_verify off;
+    proxy_buffering off;
+    add_header Access-Control-Allow-Origin "*" always;
+    add_header Access-Control-Allow-Methods "GET, POST, OPTIONS" always;
+    add_header Access-Control-Allow-Headers "Content-Type, Authorization" always;
+    
+    # Handle CORS preflight
+    if ($request_method = OPTIONS) {
+      add_header Access-Control-Allow-Origin "*";
+      add_header Access-Control-Allow-Methods "GET, POST, OPTIONS";
+      add_header Access-Control-Allow-Headers "Content-Type, Authorization";
+      add_header Content-Length 0;
+      add_header Content-Type text/plain;
+      return 204;
+    }
+  }
+  location / {
+    proxy_set_header Host '${KIBANA_URL_WITHOUT_PROTOCOL}';
+    proxy_pass '${KIBANA_URL}';
+    proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+    proxy_set_header Connection "keep-alive";
+    proxy_hide_header Content-Security-Policy;
+    proxy_hide_header X-Frame-Options;
+    proxy_hide_header X-Content-Type-Options;
+    proxy_hide_header Strict-Transport-Security;
+    proxy_set_header X-Scheme $scheme;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header Authorization "Basic '${BASE64}'";
+    proxy_set_header Accept-Encoding "gzip, deflate, br";
+    proxy_set_header Accept "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8";
+    proxy_set_header Accept-Language "en-US,en;q=0.9";
+    # Set User-Agent to appear as modern Chrome browser (updated to latest version)
+    proxy_set_header User-Agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+    proxy_set_header Sec-Fetch-Site "none";
+    proxy_set_header Sec-Fetch-Mode "navigate";
+    proxy_set_header Sec-Fetch-User "?1";
+    proxy_set_header Sec-Fetch-Dest "document";
+    proxy_set_header Upgrade-Insecure-Requests "1";
+    proxy_redirect off;
+    proxy_http_version 1.1;
+    client_max_body_size 20M;
+    proxy_read_timeout 600;
+    proxy_buffering off;
+    proxy_send_timeout          300;
+    send_timeout                300;
+    proxy_connect_timeout       300;
+ }
+}
+
+server {
+  listen 9200;
+  server_name elasticsearch;
+
+  location / {
+    proxy_pass '${ES_URL}';
+    proxy_connect_timeout       300;
+    proxy_send_timeout          300;
+    proxy_read_timeout          300;
+    send_timeout                300;
+  }
+}
+' > /etc/nginx/conf.d/default.conf
+
+echo "Restart NGINX"
+systemctl restart nginx
+
+# Verify NGINX is running and listening on port 8080
+sleep 2
+if systemctl is-active --quiet nginx; then
+    echo "✅ NGINX is running"
+    if netstat -tlnp 2>/dev/null | grep -q ":8080 " || ss -tlnp 2>/dev/null | grep -q ":8080 "; then
+        echo "✅ NGINX is listening on port 8080"
+    else
+        echo "⚠️  Warning: NGINX may not be listening on port 8080"
+    fi
+else
+    echo "❌ ERROR: NGINX failed to start"
+    systemctl status nginx || true
+    exit 1
+fi
+
+echo "Setting up JSON server on port 8081..."
+
+# Check if the JSON file exists
+if [ ! -f "/tmp/project_results.json" ]; then
+    echo "Warning: /tmp/project_results.json not found!"
+    echo "The server will return an error when accessed."
+fi
+
+# Assume nothing is running on port 8081
+echo "Starting JSON server on port 8081..."
+
+# Start the server in background
+echo "Starting JSON server in background..."
+python3 bin/serve_json.py > /tmp/server-serve-json.log 2>&1 &
+
+# Get the process ID
+SERVER_PID=$!
+
+# Wait a moment for the server to start
+sleep 2
+
+# Check if server started successfully
+sleep 2
+if kill -0 $SERVER_PID 2>/dev/null; then
+    echo ":white_check_mark: Server started successfully!"
+    echo ":bar_chart: Server PID: $SERVER_PID"
+    echo ":memo: Logs: /tmp/server-serve-json.log"
+    echo ":globe_with_meridians: Access URL: http://localhost:8081"
+    echo ""
+    echo ":clipboard: Useful commands:"
+    echo "  View logs: tail -f /tmp/server-serve-json.log"
+    echo "  Test server: curl http://localhost:8081"
+    echo "  Stop server: kill $SERVER_PID"
+    echo "  Check status: ps aux | grep serve_json"
+else
+    echo ":x: Failed to start server"
+    echo "Check /tmp/server-serve-json.log for details:"
+    if [ -f "/tmp/server-serve-json.log" ]; then
+        tail -5 /tmp/server-serve-json.log
+    else
+        echo "No log file found"
+    fi
+    exit 1
+fi
+
+echo "done"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Elastic Observability Demo Platform setup
+# Credentials (KIBANA_URL, ELASTICSEARCH_API_KEY) are already set above.
+# The demo app runs on port 8090 (nginx owns 8080).
+# ─────────────────────────────────────────────────────────────────────────────
+
+DEMO_REPO="https://github.com/poulsbopete/elastic-launch-demo.git"
+DEMO_BRANCH="feat/back-navigation-noc-chaos"
+DEMO_DIR="/opt/elastic-launch-demo"
+DEMO_PORT=8090
+
+echo "Cloning elastic-launch-demo..."
+if [[ -d "$DEMO_DIR" ]]; then
+  git -C "$DEMO_DIR" pull --ff-only 2>/dev/null || true
+else
+  git clone --branch "$DEMO_BRANCH" "$DEMO_REPO" "$DEMO_DIR"
+fi
+
+echo "Installing Python dependencies..."
+# Install into a dedicated target dir — avoids PEP 668 / EXTERNALLY-MANAGED entirely
+PKGS_DIR="$DEMO_DIR/packages"
+mkdir -p "$PKGS_DIR"
+# Bootstrap pip into the target dir using get-pip.py (no system pip needed)
+curl -fsSL https://bootstrap.pypa.io/get-pip.py | python3 - --target="$PKGS_DIR" --quiet 2>/dev/null || true
+# Install all requirements into the same target dir
+PYTHONPATH="$PKGS_DIR" python3 -m pip install \
+  --target="$PKGS_DIR" --prefer-binary --quiet \
+  -r "$DEMO_DIR/requirements.txt"
+mkdir -p "$DEMO_DIR/data"
+
+# Get Instruqt participant email to pre-fill the Chaos Controller operator field.
+# Falls back to a stub so OPERATOR_EMAIL is always set and nothing downstream fails.
+PARTICIPANT_EMAIL=""
+if command -v instruqt &>/dev/null; then
+  PARTICIPANT_EMAIL="$(instruqt participant get --format json 2>/dev/null \
+    | python3 -c "import sys,json; p=json.load(sys.stdin); print(p.get('email',''))" \
+    2>/dev/null || echo "")"
+fi
+if [[ -z "$PARTICIPANT_EMAIL" ]]; then
+  # Fallback: try the runtime socket
+  PARTICIPANT_EMAIL="$(curl -sf --unix-socket /var/run/instruqt/runtime.sock \
+    http://localhost/participant 2>/dev/null \
+    | python3 -c "import sys,json; p=json.load(sys.stdin); print(p.get('email',''))" \
+    2>/dev/null || echo "")"
+fi
+if [[ -z "$PARTICIPANT_EMAIL" ]]; then
+  PARTICIPANT_EMAIL="participant@instruqt.local"
+  echo "Participant email not available — using stub: $PARTICIPANT_EMAIL"
+else
+  echo "Participant email resolved: $PARTICIPANT_EMAIL"
+fi
+
+echo "Patching demo app for PayPal-only scenario..."
+mkdir -p "$DEMO_DIR/scenarios/paypal"
+touch "$DEMO_DIR/scenarios/paypal/__init__.py"
+cat > "$DEMO_DIR/scenarios/paypal/scenario.py" << 'PAYPAL_EOF'
+from __future__ import annotations
+from typing import Any
+from scenarios.base import UITheme
+from scenarios.fanatics.scenario import FanaticsScenario
+
+class PayPalScenario(FanaticsScenario):
+    @property
+    def scenario_id(self) -> str: return "paypal"
+    @property
+    def scenario_name(self) -> str: return "PayPal Merchant Observability"
+    @property
+    def scenario_description(self) -> str:
+        return "Merchant payments platform across 7 microservices on AWS, GCP, and Azure."
+    @property
+    def namespace(self) -> str: return "paypal"
+    @property
+    def theme(self) -> UITheme:
+        return UITheme(
+            bg_primary="#080d1a", bg_secondary="#0d1529", bg_tertiary="#162040",
+            accent_primary="#0070ba", accent_secondary="#003087",
+            text_primary="#e6edf3", text_secondary="#8b9ab0", text_accent="#0070ba",
+            status_nominal="#3fb950", status_warning="#d29922", status_critical="#f85149", status_info="#0070ba",
+            font_family="'Inter','Segoe UI',system-ui,sans-serif", font_mono="'JetBrains Mono','Fira Code',monospace",
+            font_size_base="14px", scanline_effect=False, glow_effect=False, grid_background=False,
+            gradient_accent="linear-gradient(135deg,#003087 0%,#0070ba 100%)",
+            dashboard_title="PayPal Merchant Operations", chaos_title="Payment Incident Simulator",
+            landing_title="PayPal Observability Center", service_label="Service", channel_label="Incident",
+        )
+    @property
+    def services(self) -> dict[str, dict[str, Any]]:
+        return {
+            "merchant-api": {"cloud_provider":"aws","cloud_region":"us-east-1","cloud_platform":"aws_ec2","cloud_availability_zone":"us-east-1a","subsystem":"merchant_management","language":"java"},
+            "checkout-service": {"cloud_provider":"aws","cloud_region":"us-east-1","cloud_platform":"aws_ec2","cloud_availability_zone":"us-east-1b","subsystem":"checkout","language":"python"},
+            "payments-orchestrator": {"cloud_provider":"aws","cloud_region":"us-east-1","cloud_platform":"aws_ec2","cloud_availability_zone":"us-east-1c","subsystem":"payments","language":"go"},
+            "fraud-decisioning": {"cloud_provider":"gcp","cloud_region":"us-central1","cloud_platform":"gcp_compute_engine","cloud_availability_zone":"us-central1-a","subsystem":"risk","language":"python"},
+            "settlement-service": {"cloud_provider":"gcp","cloud_region":"us-central1","cloud_platform":"gcp_compute_engine","cloud_availability_zone":"us-central1-b","subsystem":"settlement","language":"python","generates_traces":False},
+            "merchant-support-api": {"cloud_provider":"azure","cloud_region":"eastus","cloud_platform":"azure_vm","cloud_availability_zone":"eastus-1","subsystem":"support","language":"go","generates_traces":False},
+            "notification-service": {"cloud_provider":"azure","cloud_region":"eastus","cloud_platform":"azure_vm","cloud_availability_zone":"eastus-2","subsystem":"notifications","language":"java","generates_traces":False},
+        }
+
+scenario = PayPalScenario()
+PAYPAL_EOF
+
+python3 - << 'PATCH_INIT_EOF'
+import re, sys
+path = "/opt/elastic-launch-demo/scenarios/__init__.py"
+try:
+    with open(path) as f: content = f.read()
+    new_list = '    _scenario_modules = [\n        "scenarios.paypal.scenario",\n    ]'
+    content = re.sub(r'    _scenario_modules = \[.*?\]', new_list, content, flags=re.DOTALL)
+    with open(path, "w") as f: f.write(content)
+    print("Patched scenarios/__init__.py — PayPal only")
+except Exception as e:
+    print(f"WARN: patch failed: {e}", file=sys.stderr)
+PATCH_INIT_EOF
+
+python3 - << 'PATCH_ICON_EOF'
+import sys
+path = "/opt/elastic-launch-demo/app/selector/static/index.html"
+try:
+    with open(path) as f: content = f.read()
+    content = content.replace("const SCENARIO_ICONS = {", "const SCENARIO_ICONS = {\n        paypal: '\U0001f4b3',")
+    with open(path, "w") as f: f.write(content)
+    print("Patched selector — PayPal icon added")
+except Exception as e:
+    print(f"WARN: icon patch failed: {e}", file=sys.stderr)
+PATCH_ICON_EOF
+
+echo "Demo app patched for PayPal ✓"
+
+echo "Creating systemd service for demo app (port $DEMO_PORT)..."
+cat > /etc/systemd/system/elastic-demo.service <<EOF
+[Unit]
+Description=Elastic Observability Demo Platform
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=${DEMO_DIR}
+Environment=PATH=${DEMO_DIR}/packages/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PYTHONPATH=${DEMO_DIR}/packages
+Environment=OPERATOR_EMAIL=${PARTICIPANT_EMAIL}
+ExecStart=/usr/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port ${DEMO_PORT}
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=elastic-demo
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable elastic-demo
+systemctl start  elastic-demo
+
+echo "Waiting for demo app to become healthy on port $DEMO_PORT..."
+for i in $(seq 1 60); do
+  if curl -sf "http://localhost:${DEMO_PORT}/health" >/dev/null 2>&1; then
+    echo "Demo app healthy after ${i}s ✓"
+    break
+  fi
+  if [[ $i -eq 60 ]]; then
+    echo "WARN: Demo app did not become healthy after 60s"
+  fi
+  sleep 1
+done
+
+# Credentials are already exported by the project-creation block above.
+# KIBANA_URL and ELASTICSEARCH_API_KEY are set as env vars in this script.
+DEMO_KIBANA_URL="${KIBANA_URL:-}"
+DEMO_API_KEY="${ELASTICSEARCH_API_KEY:-}"
+
+if [[ -n "$DEMO_KIBANA_URL" && -n "$DEMO_API_KEY" ]]; then
+  echo "Launching PayPal scenario against $DEMO_KIBANA_URL ..."
+
+  PAYPAL_LAUNCH=$(curl -sf -X POST "http://localhost:${DEMO_PORT}/api/setup/launch" \
+    -H 'Content-Type: application/json' \
+    -d "{\"scenario_id\":\"paypal\",\"kibana_url\":\"${DEMO_KIBANA_URL}\",\"api_key\":\"${DEMO_API_KEY}\"}" \
+    2>/dev/null || echo "FAILED")
+
+  if echo "$PAYPAL_LAUNCH" | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if d.get('ok') or d.get('deployment_id') else 1)" 2>/dev/null; then
+    echo "PayPal scenario launched ✓"
+  else
+    echo "Falling back to fanatics scenario..."
+    curl -sf -X POST "http://localhost:${DEMO_PORT}/api/setup/launch" \
+      -H 'Content-Type: application/json' \
+      -d "{\"scenario_id\":\"fanatics\",\"kibana_url\":\"${DEMO_KIBANA_URL}\",\"api_key\":\"${DEMO_API_KEY}\"}" \
+      >/dev/null 2>&1 || echo "WARN: Launch request failed — learners can launch manually via the Demo App tab."
+  fi
+
+  echo "Waiting for deployment to register..."
+  for i in $(seq 1 120); do
+    RUNNING="$(curl -sf "http://localhost:${DEMO_PORT}/api/deployments" 2>/dev/null \
+      | python3 -c "import sys,json; deps=json.load(sys.stdin); print(sum(1 for d in deps if d.get('running')))" 2>/dev/null || echo 0)"
+    if [[ "$RUNNING" -ge 1 ]]; then
+      echo "Deployment active after ${i}s ✓"
+      break
+    fi
+    if [[ $i -eq 120 ]]; then
+      echo "WARN: Deployment did not register after 240s"
+    fi
+    sleep 2
+  done
+else
+  echo "WARN: Missing Kibana URL or API key — skipping auto-launch."
+fi
+
+# Convenience aliases
+cat >> /root/.bashrc <<'BASH'
+
+# PayPal Merchant Observability — demo aliases
+alias demo-logs="journalctl -u elastic-demo -f --no-pager"
+alias demo-status="curl -sf http://localhost:8090/api/status | python3 -m json.tool"
+alias demo-deployments="curl -sf http://localhost:8090/api/deployments | python3 -m json.tool"
+alias demo-chaos="curl -sf http://localhost:8090/api/chaos/status | python3 -m json.tool"
+alias demo-restart="systemctl restart elastic-demo && sleep 3 && curl -sf http://localhost:8090/health"
+alias merchant-logs='curl -sf http://localhost:8090/api/status | python3 -m json.tool'
+BASH
+
+echo "Track setup complete — PayPal Merchant Observability environment ready."

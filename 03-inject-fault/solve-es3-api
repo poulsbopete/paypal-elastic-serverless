@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Challenge 3 solve: programmatically trigger channel 1.
+set -euo pipefail
+
+log()  { printf "[ch3-solve] %s\n" "$*"; }
+fail() { printf "[ch3-solve ERROR] %s\n" "$*"; exit 1; }
+
+APP="http://localhost:8090"
+
+# ── Get deployment ID ─────────────────────────────────────────────────────────
+DEPS="$(curl -sf "${APP}/api/deployments" 2>/dev/null || echo "[]")"
+DEP_ID="$(echo "$DEPS" | python3 -c "
+import sys, json
+deps = json.load(sys.stdin)
+print(deps[0]['deployment_id'] if deps else '')
+" 2>/dev/null || echo "")"
+
+[[ -n "$DEP_ID" ]] || fail "No active deployment. Run Challenge 1 solve first."
+
+# ── Trigger channel 1 ────────────────────────────────────────────────────────
+log "Triggering fault channel 1 on deployment $DEP_ID..."
+
+RESULT="$(curl -sf -X POST "${APP}/api/chaos/trigger" \
+  -H 'Content-Type: application/json' \
+  -d "{\"deployment_id\":\"${DEP_ID}\",\"channel\":1}" 2>/dev/null || echo "{}")"
+
+ACTIVE="$(echo "$RESULT" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+print(str(r.get('active', False)).lower())
+" 2>/dev/null || echo "false")"
+
+if [[ "$ACTIVE" != "true" ]]; then
+  # Check if it's already active (idempotent)
+  STATUS="$(curl -sf "${APP}/api/chaos/status/1?deployment_id=${DEP_ID}" 2>/dev/null || echo "{}")"
+  ALREADY="$(echo "$STATUS" | python3 -c "import sys,json; print(str(json.load(sys.stdin).get('active',False)).lower())" 2>/dev/null || echo "false")"
+  [[ "$ALREADY" == "true" ]] || fail "Channel 1 trigger failed. Response: $RESULT"
+fi
+
+log "Channel 1 is now active — errors are flowing into Elastic."
+log "Check Kibana → Observability → Alerts within ~60 seconds to see detection."

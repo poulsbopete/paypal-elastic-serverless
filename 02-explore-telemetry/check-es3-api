@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Challenge 2 check: confirm deployment is active and telemetry is flowing.
+set -euo pipefail
+
+fail() { echo "❌ $*"; exit 1; }
+pass() { echo "✅ $*"; }
+
+APP="http://localhost:8090"
+
+# ── App still healthy ─────────────────────────────────────────────────────────
+curl -sf "${APP}/health" >/dev/null 2>&1 || fail "Demo app is not responding. Run: systemctl restart elastic-demo"
+pass "Demo app is healthy"
+
+# ── Deployment still running ──────────────────────────────────────────────────
+DEPS="$(curl -sf "${APP}/api/deployments" 2>/dev/null || echo "[]")"
+RUNNING="$(echo "$DEPS" | python3 -c "
+import sys, json
+deps = json.load(sys.stdin)
+print(sum(1 for d in deps if d.get('running')))
+" 2>/dev/null || echo "0")"
+
+[[ "$RUNNING" -ge 1 ]] || fail "No running deployments. Return to Challenge 1 or redeploy via the Demo App."
+pass "Deployment is running ($RUNNING active)"
+
+# ── Services generating telemetry ─────────────────────────────────────────────
+STATUS="$(curl -sf "${APP}/api/status" 2>/dev/null || echo "{}")"
+SVC_COUNT="$(echo "$STATUS" | python3 -c "
+import sys, json
+s = json.load(sys.stdin)
+svcs = s.get('services', {})
+print(len(svcs))
+" 2>/dev/null || echo "0")"
+
+if [[ "$SVC_COUNT" -ge 1 ]]; then
+  pass "Services active: $SVC_COUNT microservice(s) generating telemetry"
+else
+  pass "Deployment running (service count not available in status)"
+fi
+
+echo ""
+echo "🎉 Telemetry is flowing. Explore Kibana — logs, APM, hosts — then move to the next challenge."
+exit 0
