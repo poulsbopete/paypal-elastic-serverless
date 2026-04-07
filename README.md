@@ -316,10 +316,10 @@ Update the tab URL in `01-connect-and-deploy/assignment.md`, then push to Instru
 | Resource | Value |
 |---|---|
 | Track slug | `paypal-elastic-serverless` |
-| Track ID | `1tpbmpeq2nao` |
+| Track ID | `q7432fqzit6g` |
 | Instruqt org | `elastic` |
 | GitHub repo | `github.com/poulsbopete/paypal-elastic-serverless` |
-| Base track | `elastic/elastic-autonomous-observability-copy` |
+| Upstream inspiration | `elastic/elastic-autonomous-observability` (financial scenario; this track is **not** `elastic-autonomous-observability-copy`) |
 | Demo app repo | `github.com/poulsbopete/elastic-launch-demo` (branch `feat/back-navigation-noc-chaos`) |
 
 ---

@@ -1,6 +1,6 @@
 slug: paypal-elastic-serverless
-id: 1tpbmpeq2nao
-title: 'PayPal Merchant Observability: Elastic Serverless + OpenTelemetry'
+id: q7432fqzit6g
+title: 'PayPal Elastic Serverless — Merchant Observability + OpenTelemetry'
 description: Experience how Elastic Serverless + OpenTelemetry replaces CAL logging,
   unifies merchant-centric observability, and enables autonomous incident response
   at PayPal scale.
@@ -28,5 +28,5 @@ lab_config:
     name: modern-dark
   override_challenge_layout: false
   hideStopButton: false
-checksum: "9644232401998530476"
+checksum: "5452805190072428143"
 enhanced_loading: false
