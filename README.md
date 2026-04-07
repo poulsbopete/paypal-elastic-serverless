@@ -309,6 +309,17 @@ https://rawcdn.githack.com/poulsbopete/paypal-elastic-serverless/<commit-sha>/do
 
 Update the tab URL in `01-connect-and-deploy/assignment.md`, then push to Instruqt.
 
+### GitHub Pages — PayPal AIOps slides
+
+The deck **The PayPal AIOps Blueprint** is published as static slides under `docs/aiops-slides/` (14 PNGs exported from the source `.pptx`, plus `index.html` for navigation).
+
+1. In the GitHub repo: **Settings → Pages → Build and deployment → Source**: Deploy from branch **`main`**, folder **`/docs`**.
+2. After the site builds, open:
+   - **Hub:** `https://<user>.github.io/<repo>/`
+   - **Slides:** `https://<user>.github.io/<repo>/aiops-slides/`
+
+Use **← →**, **Space**, **Home** / **End**, or click the image halves / dots to move between slides. Optional captions are in the `LABELS` array inside `docs/aiops-slides/index.html` (the PPTX contains no extractable text, so titles are editable there).
+
 ---
 
 ## Track IDs
