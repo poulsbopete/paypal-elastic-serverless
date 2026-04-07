@@ -244,7 +244,7 @@ p{font-size:13px;line-height:1.7;color:#94a3b8}a.btn{display:inline-block;margin
 <div class="card"><h2>The Solution</h2><p>Elastic Serverless + OpenTelemetry replaces CAL with a vendor-neutral schema, unifies all signals in one platform, and handles PayPal-scale cardinality. Zero cluster management. Native OTLP. Built-in AI Assistant. Autonomous remediation workflows.</p></div>
 <div class="card"><h2>CAL → OTel Mapping</h2><p>CAL_TYPE → service.name &nbsp;|&nbsp; TXN_ID → trace.id &nbsp;|&nbsp; MERCHANT_ID → merchant.id &nbsp;|&nbsp; DURATION_MS → span duration &nbsp;|&nbsp; STATUS → http.response.status_code</p></div>
 <div class="card"><h2>ES|QL at Merchant Scale</h2><p>One query language across logs, metrics, and traces:<br><code style="color:#38bdf8">FROM paypal-otel-logs | WHERE merchant.id == "M-98231" AND severity_text == "ERROR" | STATS errors = COUNT(*) BY service.name</code></p></div>
-<div class="card"><h2>7 Services Running Now</h2><p>merchant-api · checkout-service · payments-orchestrator · fraud-decisioning · settlement-service · merchant-support-api · notification-service — all emitting live OTLP telemetry to your Elastic Serverless project.</p></div>
+<div class="card"><h2>9 Services Running Now</h2><p>order-gateway · matching-engine · risk-calculator · market-data-feed · settlement-processor · fraud-detector · compliance-monitor · customer-portal · audit-logger — all emitting live OTLP telemetry to your Elastic Serverless project.</p></div>
 <a class="btn" href="/app/dashboards#/list?_g=(filters:!(),refreshInterval:(pause:!f,value:30000),time:(from:now-30m,to:now))">Open Kibana Dashboards &rarr;</a>
 </body></html>
 HTML_EOF
@@ -740,96 +740,55 @@ import os, re, sys
 DEMO_DIR = "/opt/elastic-launch-demo"
 
 REPLACEMENTS = [
-    # ── Scenario registry: limit to fanatics only ─────────────────────────────
-    # (applied to __init__.py via regex below, not string replace)
-
     # ── Scenario display name & description ───────────────────────────────────
-    ("Fanatics Collectibles",       "PayPal Merchant Observability"),
-    ("Fanatics Live",               "PayPal Merchant Observability"),
-    ("fanatics.com",                "paypal.com"),
-    # common description fragments
-    ("Enterprise infrastructure and network operations for vertically integrated trading cards and memorabilia",
-     "Merchant payments platform across 7 microservices on AWS, GCP, and Azure"),
-    ("trading cards and memorabilia", "merchant payments and checkout"),
-    ("Incident Simulator",          "Payment Incident Simulator"),
+    ("Financial Trading Platform",  "PayPal Payments Platform"),
+    ("Trading Operations Center",   "PayPal Operations Center"),
+    ("Market Disruption Simulator", "Payment Incident Simulator"),
+    ("Bloomberg terminal-style Operations Center",
+     "PayPal real-time payments operations center"),
+    ("Real-time trading operations with order management, matching engine, "
+     "risk calculation, market data, and settlement systems.",
+     "Real-time payment operations across order gateway, matching engine, "
+     "risk scoring, settlement, and fraud detection systems."),
+    ("Trading Operations Analyst",  "PayPal Payments Analyst"),
+    ("finserv-trading-analyst",     "paypal-payments-analyst"),
+    ("trading_risk_assessment",     "paypal_payment_assessment"),
 
     # ── Kibana Dashboard names & descriptions ─────────────────────────────────
-    ("Fanatics Collectibles Executive Dashboard",               "PayPal Merchant Observability Executive Dashboard"),
-    ("Fanatics Collectibles Service Health",                    "PayPal Service Health"),
-    ("Fanatics Collectibles APM",                               "PayPal APM"),
-    ("Fanatics Collectibles Infrastructure",                    "PayPal Infrastructure"),
-    ("Fanatics Collectibles Logs",                              "PayPal Logs"),
-    ("Executive overview of Fanatics Collectibles telemetry",
-     "Executive overview of PayPal merchant payments telemetry"),
-    ("service health, APM, NGINX, VPC flows, K8s cluster health",
-     "service health, APM, transaction flows, and infrastructure"),
-    ("NGINX, VPC flows, K8s cluster health",
-     "transaction flows, payment gateway health, and multi-cloud infrastructure"),
+    ("Financial Services Executive Dashboard",  "PayPal Merchant Observability Executive Dashboard"),
+    ("Financial Services Service Health",       "PayPal Service Health"),
+    ("Financial Services APM",                  "PayPal APM"),
+    ("Financial Services Infrastructure",       "PayPal Infrastructure"),
+    ("Financial Services Logs",                 "PayPal Logs"),
+    ("Executive overview of Financial Services telemetry",
+     "Executive overview of PayPal payments platform telemetry"),
 
     # ── Kibana Workflow names ──────────────────────────────────────────────────
-    ("Fanatics Collectibles Significant Event Notification",    "PayPal Payment Incident Alert & Notification"),
-    ("Fanatics Collectibles Remediation Action",                "PayPal Payment Incident Remediation"),
-    ("Fanatics Collectibles Escalation and Hold Management",    "PayPal Incident Escalation & Hold Management"),
-    ("Fanatics Collectibles Daily Update Report",               "PayPal SRE Daily Health Report"),
+    ("Financial Services Significant Event Notification",   "PayPal Payment Incident Alert & Notification"),
+    ("Financial Services Remediation Action",               "PayPal Payment Incident Remediation"),
+    ("Financial Services Escalation and Hold Management",   "PayPal Incident Escalation & Hold Management"),
+    ("Financial Services Daily Update Report",              "PayPal SRE Daily Health Report"),
 
-    # ── Service name remapping (Fanatics e-commerce → PayPal payments) ──────────
-    # hyphenated  (OTel service.name)
-    ("digital-marketplace",      "merchant-api"),
-    ("card-printing-system",     "checkout-service"),
-    ("auction-engine",           "payments-orchestrator"),
-    ("cloud-inventory-scanner",  "fraud-decisioning"),
-    ("packaging-fulfillment",    "settlement-service"),
-    ("card-grading-service",     "merchant-support-api"),
-    ("authentication-service",   "notification-service"),
-    ("fulfillment-service",      "notification-service"),
-    ("inventory-service",        "merchant-support-api"),
-    ("shipping-service",         "merchant-support-api"),
-    ("mysql-primary",            "payments-datastore"),
-    # CamelCase variants (Python class references)
-    ("DigitalMarketplace",       "MerchantApi"),
-    ("CardPrintingSystem",       "CheckoutService"),
-    ("AuctionEngine",            "PaymentsOrchestrator"),
-    ("CloudInventoryScanner",    "FraudDecisioning"),
-    ("PackagingFulfillment",     "SettlementService"),
-    ("CardGradingService",       "MerchantSupportApi"),
-    ("AuthenticationService",    "NotificationService"),
-    # snake_case variants (Python dict keys / env vars)
-    ("digital_marketplace",      "merchant_api"),
-    ("card_printing_system",     "checkout_service"),
-    ("auction_engine",           "payments_orchestrator"),
-    ("cloud_inventory_scanner",  "fraud_decisioning"),
-    ("packaging_fulfillment",    "settlement_service"),
-    # Display name variants (titles in UI)
-    ("Digital Marketplace",      "Merchant API"),
-    ("Card Printing System",     "Checkout Service"),
-    ("Auction Engine",           "Payments Orchestrator"),
-    ("Cloud Inventory Scanner",  "Fraud Decisioning"),
-    ("Packaging Fulfillment",    "Settlement Service"),
-    ("Card Grading Service",     "Merchant Support API"),
-    ("Authentication Service",   "Notification Service"),
-    ("MySQL Primary",            "Payments Datastore"),
-
-    # ── Chaos channel names (map Fanatics retail/network → PayPal payments) ───
-    ("MAC Address Flapping",                    "Payment Authorization Timeout"),
-    ("Spanning Tree Topology Change",           "Checkout Session Failure Spike"),
-    ("BGP Peer Flapping",                       "Fraud Decisioning Latency Spike"),
-    ("Firewall Session Table Exhaustion",       "Merchant API Rate Limit Exceeded"),
-    ("Firewall CPU Overload",                   "Settlement Batch Processing Delay"),
-    ("SSL Decryption Certificate Expiry",       "3DS Authentication Service Outage"),
-    ("WiFi AP Disconnect Storm",                "Payment Network Gateway Timeout"),
-    ("WiFi Channel Interference",               "Merchant Webhook Delivery Failure"),
-    ("Client Authentication Storm",             "Currency Conversion Service Error"),
-    ("DNS Resolution Failure Over VPN",         "Recurring Payment Processing Failure"),
-    ("DHCP Lease Storm",                        "Chargeback Processing Queue Backlog"),
-    ("Auction Bid Latency Spike",               "International Transaction Routing Failure"),
-    ("Payment Processing Timeout",              "Mobile SDK Token Refresh Failure"),
-    ("Product Catalog Sync Failure",            "Risk Score Calculation Timeout"),
-    ("Print Queue Overflow",                    "PayPal Wallet Balance Sync Error"),
-    ("Quality Control Rejection Spike",         "Fraud Model Feature Store Timeout"),
-    ("Fulfillment Label Printer Failure",       "Notification Service Queue Backlog"),
-    ("Warehouse Scanner Desync",                "Cross-Region Failover Trigger"),
-    ("Orphaned Cloud Resource Alert",           "Payments Orchestrator Circuit Breaker"),
-    ("Cross-Cloud VPN Tunnel Flapping",         "Gateway Connection Pool Exhaustion"),
+    # ── Service display name remapping (Financial Trading → PayPal Payments) ──
+    # These rename the UI labels while keeping OTel service.name intact
+    ("Order Gateway",           "Payment Gateway"),
+    ("Matching Engine",         "Payment Processor"),
+    ("Risk Calculator",         "Risk Scoring Engine"),
+    ("Market Data Feed",        "Merchant Data Feed"),
+    ("Settlement Processor",    "Settlement Service"),
+    ("Fraud Detector",          "Fraud Detection"),
+    ("Compliance Monitor",      "Compliance Service"),
+    ("Customer Portal",         "Customer Portal"),
+    ("Audit Logger",            "Audit Service"),
+    # snake_case variants (Python dict keys)
+    ("order_gateway",           "payment_gateway"),
+    ("matching_engine",         "payment_processor"),
+    ("risk_calculator",         "risk_scoring"),
+    ("market_data_feed",        "merchant_data_feed"),
+    ("settlement_processor",    "settlement_service"),
+    ("fraud_detector",          "fraud_detection"),
+    ("compliance_monitor",      "compliance_service"),
+    ("audit_logger",            "audit_service"),
 ]
 
 # ── Patch scenario registry ────────────────────────────────────────────────────
@@ -839,13 +798,13 @@ try:
         content = f.read()
     patched = re.sub(
         r'(_scenario_modules\s*=\s*\[)[^\]]*(\])',
-        r'\1\n        "scenarios.fanatics.scenario",\n    \2',
+        r'\1\n        "scenarios.financial.scenario",\n    \2',
         content, flags=re.DOTALL
     )
     if patched != content:
         with open(init_path, "w") as f:
             f.write(patched)
-        print("scenarios/__init__.py: registry limited to fanatics ✓")
+        print("scenarios/__init__.py: registry limited to financial ✓")
     else:
         print("WARN: _scenario_modules not matched in __init__.py", file=sys.stderr)
 except Exception as e:
@@ -881,28 +840,8 @@ else:
     print("WARN: No files matched — channel definitions may use a different format", file=sys.stderr)
 PAYPAL_PATCH_EOF
 
-# Rename service module files to match the patched import paths in scenario.py.
-# The content patch above rewrites 'digital_marketplace' → 'merchant_api' inside
-# scenario.py, but the actual .py files on disk still have the old names.
-SVCDIR="/opt/elastic-launch-demo/scenarios/fanatics/services"
-declare -A FILE_RENAMES=(
-  ["digital_marketplace.py"]="merchant_api.py"
-  ["auction_engine.py"]="payments_orchestrator.py"
-  ["cloud_inventory_scanner.py"]="fraud_decisioning.py"
-  ["packaging_fulfillment.py"]="settlement_service.py"
-  ["card_grading_service.py"]="merchant_support_api.py"
-  ["authentication_service.py"]="notification_service.py"
-  ["fulfillment_service.py"]="notification_service.py"
-)
-for OLD in "${!FILE_RENAMES[@]}"; do
-  NEW="${FILE_RENAMES[$OLD]}"
-  if [[ -f "$SVCDIR/$OLD" && ! -f "$SVCDIR/$NEW" ]]; then
-    mv "$SVCDIR/$OLD" "$SVCDIR/$NEW"
-    echo "Renamed service file: $OLD → $NEW ✓"
-  elif [[ -f "$SVCDIR/$NEW" ]]; then
-    echo "Service file already renamed: $NEW (skipping $OLD)"
-  fi
-done
+# Financial scenario service files are already correctly named (order_gateway.py,
+# matching_engine.py, etc.) — no file renaming needed.
 echo "Demo app PayPal patch complete ✓"
 
 # Remove the "Elastic Observability" and "API Endpoints" sections from the landing page.
@@ -1123,7 +1062,7 @@ WorkingDirectory=${DEMO_DIR}
 Environment=PATH=${DEMO_DIR}/packages/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=PYTHONPATH=${DEMO_DIR}/packages
 Environment=OPERATOR_EMAIL=${PARTICIPANT_EMAIL}
-Environment=ACTIVE_SCENARIO=fanatics
+Environment=ACTIVE_SCENARIO=financial
 ExecStart=/usr/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port ${DEMO_PORT}
 Restart=on-failure
 RestartSec=5
@@ -1226,11 +1165,11 @@ if [[ "$DEMO_HEALTHY" == "true" && -n "$DEMO_KIBANA_URL" && -n "$DEMO_API_KEY" ]
     echo ""
   fi
 
-  echo "Launching fanatics scenario against $DEMO_KIBANA_URL ..."
+  echo "Launching financial scenario against $DEMO_KIBANA_URL ..."
 
   curl -sf -X POST "http://localhost:${DEMO_PORT}/api/setup/launch" \
     -H 'Content-Type: application/json' \
-    -d "{\"scenario_id\":\"fanatics\",\"kibana_url\":\"${DEMO_KIBANA_URL}\",\"api_key\":\"${DEMO_API_KEY}\",\"otlp_url\":\"${DEMO_OTLP_URL}\"}" \
+    -d "{\"scenario_id\":\"financial\",\"kibana_url\":\"${DEMO_KIBANA_URL}\",\"api_key\":\"${DEMO_API_KEY}\",\"otlp_url\":\"${DEMO_OTLP_URL}\"}" \
     >/dev/null 2>&1 || echo "WARN: Launch request failed — learners can launch manually via the Demo App tab."
 
   echo "Waiting for deployment to register..."
@@ -1334,23 +1273,39 @@ log = logging.getLogger('paypal-otel')
 CFG_PATH = '/tmp/paypal-otlp.json'
 
 SERVICES = [
-    {'name': 'merchant-api',          'region': 'us-east-1', 'cloud': 'aws'},
-    {'name': 'checkout-service',      'region': 'us-east-1', 'cloud': 'aws'},
-    {'name': 'payments-orchestrator', 'region': 'us-east-1', 'cloud': 'aws'},
-    {'name': 'fraud-decisioning',     'region': 'us-central1', 'cloud': 'gcp'},
-    {'name': 'settlement-service',    'region': 'us-central1', 'cloud': 'gcp'},
-    {'name': 'merchant-support-api',  'region': 'eastus', 'cloud': 'azure'},
-    {'name': 'notification-service',  'region': 'eastus', 'cloud': 'azure'},
+    # AWS us-east-1 — core trading / order management
+    {'name': 'order-gateway',        'region': 'us-east-1',   'cloud': 'aws',   'subsystem': 'order_management'},
+    {'name': 'matching-engine',      'region': 'us-east-1',   'cloud': 'aws',   'subsystem': 'trade_execution'},
+    {'name': 'risk-calculator',      'region': 'us-east-1',   'cloud': 'aws',   'subsystem': 'risk_management'},
+    # GCP us-central1 — market data, settlement, fraud
+    {'name': 'market-data-feed',     'region': 'us-central1', 'cloud': 'gcp',   'subsystem': 'market_data'},
+    {'name': 'settlement-processor', 'region': 'us-central1', 'cloud': 'gcp',   'subsystem': 'settlement'},
+    {'name': 'fraud-detector',       'region': 'us-central1', 'cloud': 'gcp',   'subsystem': 'compliance'},
+    # Azure eastus — compliance, customer portal, audit
+    {'name': 'compliance-monitor',   'region': 'eastus',      'cloud': 'azure', 'subsystem': 'compliance'},
+    {'name': 'customer-portal',      'region': 'eastus',      'cloud': 'azure', 'subsystem': 'client_services'},
+    {'name': 'audit-logger',         'region': 'eastus',      'cloud': 'azure', 'subsystem': 'audit'},
 ]
 
 LOG_MESSAGES = {
-    'merchant-api':          ['Merchant profile loaded', 'API key validated', 'Rate limit check passed', 'Merchant settings updated', 'Authentication failed for merchant', 'Invalid merchant ID'],
-    'checkout-service':      ['Checkout session created', 'Cart validated', 'Shipping calculated', 'Session timeout', 'Cart item not found', 'Checkout session expired'],
-    'payments-orchestrator': ['Payment routed to processor', 'Authorization requested', 'Payment captured', 'Routing table miss', 'Payment declined by issuer', 'Authorization timeout'],
-    'fraud-decisioning':     ['Fraud score computed', 'Risk model applied', 'Transaction approved', 'High-risk signal detected', 'Model inference timeout', 'Velocity check failed'],
-    'settlement-service':    ['Settlement batch started', 'Reconciliation complete', 'Funds released', 'Batch file missing', 'Settlement deadline missed', 'Reconciliation error'],
-    'merchant-support-api':  ['Support ticket created', 'Case escalated', 'Account lookup complete', 'Ticket not found', 'SLA breach detected', 'Escalation failed'],
-    'notification-service':  ['Email delivered', 'Push notification sent', 'Webhook dispatched', 'Delivery failed: invalid address', 'Webhook timeout', 'Push token expired'],
+    'order-gateway':        ['Order received and validated', 'FIX order parsed', 'Pre-trade risk check passed', 'Order routed to matching engine',
+                             'OMS-BOOK-IMBALANCE: order rejected', 'FIX-PARSE-REJECT: malformed order', 'Pre-trade risk check failed'],
+    'matching-engine':      ['Order matched successfully', 'Fill generated', 'Book updated', 'Trade confirmed',
+                             'ME-LATENCY-SLA: processing time exceeded', 'ME-DARKPOOL-REJECT: venue capacity', 'Lock contention on order book'],
+    'risk-calculator':      ['Risk check passed', 'VAR calculated', 'Position limits validated', 'Margin requirement satisfied',
+                             'RISK-LIMIT-BREACH: exposure exceeded', 'RISK-MARGIN-CALL: collateral stale', 'RISK-POSITION-RECON: break detected'],
+    'market-data-feed':     ['Price tick received', 'Quote published', 'Feed heartbeat OK', 'Instrument updated',
+                             'MDF-PRICE-GAP: sequence gap detected', 'MDF-STALE-QUOTE: stale price', 'Retransmit requested from exchange'],
+    'settlement-processor': ['Settlement initiated', 'DTCC submission confirmed', 'DVP settled', 'Netting complete',
+                             'SETTLE-T2-TIMEOUT: settlement overdue', 'SETTLE-FAIL: insufficient securities', 'SETTLE-NETTING-CALC: discrepancy found'],
+    'fraud-detector':       ['Transaction screened', 'AML check passed', 'KYC verification complete', 'Pattern analysis OK',
+                             'COMPL-FRAUD-FP-STORM: false positive surge', 'COMPL-AML-SCREENING: batch delayed', 'High-risk pattern flagged'],
+    'compliance-monitor':   ['Regulatory report submitted', 'EMIR trade report sent', 'MiFID II check complete', 'Audit trail updated',
+                             'COMPL-REG-REPORT-FAIL: submission rejected', 'Report deadline approaching', 'CAT FINRA report error'],
+    'customer-portal':      ['Client session authenticated', 'Portfolio valuation served', 'Trade confirmation sent', 'P&L report generated',
+                             'PORTAL-SESSION-TIMEOUT: session expired', 'PORTAL-VALUATION-LAG: stale data', 'PORTAL-CONFIRM-DELAY: confirmation late'],
+    'audit-logger':         ['Trade event logged', 'Audit record written', 'Replication to DR confirmed', 'Sequence validated',
+                             'AUDIT-SEQ-GAP: missing sequence', 'AUDIT-REPLICATION-LAG: DR behind', 'Journal write failed'],
 }
 
 def _rand_id(n=16):
@@ -1388,8 +1343,10 @@ def make_logs(svcs, n_per_svc=3):
                 'traceId': _otlp_id(16),
                 'spanId': _otlp_id(8),
                 'attributes': [
-                    {'key': 'merchant.id', 'value': {'stringValue': f'M-{random.randint(10000,99999)}'}},
-                    {'key': 'transaction.type', 'value': {'stringValue': random.choice(['payment','refund','dispute'])}},
+                    {'key': 'trade.id',    'value': {'stringValue': f'TRD-{random.randint(100000,999999)}'}},
+                    {'key': 'instrument',  'value': {'stringValue': random.choice(['AAPL','GOOGL','MSFT','AMZN','JPM','GS','FX.EURUSD','FUT.ES'])}},
+                    {'key': 'order.type',  'value': {'stringValue': random.choice(['market','limit','stop','stop_limit'])}},
+                    {'key': 'subsystem',   'value': {'stringValue': svc.get('subsystem', 'trading')}},
                 ],
             })
         resource_logs.append({
@@ -1409,7 +1366,7 @@ def make_traces(svcs, n=2):
             spans.append({
                 'traceId': trace_id,
                 'spanId': _otlp_id(8),
-                'name': random.choice(['POST /api/payment', 'GET /merchant', 'process_transaction', 'fraud_check']),
+                'name': random.choice(['POST /api/order', 'GET /api/quote', 'process_trade', 'risk_check', 'settle_trade', 'audit_event']),
                 'kind': 2,
                 'startTimeUnixNano': str(start),
                 'endTimeUnixNano': str(start + dur),
@@ -1435,13 +1392,19 @@ def make_metrics(svcs):
              'unit': 'ms',
              'gauge': {'dataPoints': [{'timeUnixNano': ts,
                'asDouble': random.uniform(5, 500),
-               'attributes': [{'key': 'http.route', 'value': {'stringValue': '/api/payment'}}]}]}},
-            {'name': 'payment.success.rate',
-             'description': 'Payment success rate',
+               'attributes': [{'key': 'http.route', 'value': {'stringValue': '/api/order'}}]}]}},
+            {'name': 'trade.success.rate',
+             'description': 'Trade execution success rate',
              'unit': '1',
              'gauge': {'dataPoints': [{'timeUnixNano': ts,
-               'asDouble': random.uniform(0.94, 0.999),
+               'asDouble': random.uniform(0.96, 0.9999),
                'attributes': []}]}},
+            {'name': 'order.latency.us',
+             'description': 'Order processing latency in microseconds',
+             'unit': 'us',
+             'gauge': {'dataPoints': [{'timeUnixNano': ts,
+               'asDouble': random.uniform(50, 12000),
+               'attributes': [{'key': 'subsystem', 'value': {'stringValue': svc.get('subsystem', 'trading')}}]}]}},
         ]
         resource_metrics.append({
             'resource': {'attributes': _attrs(svc)},
@@ -1541,11 +1504,11 @@ def probe_es_direct(es_url, api_key):
     from datetime import datetime, timezone
     test_doc = {
         '@timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-        'service.name': 'checkout-service',
+        'service.name': 'order-gateway',
         'severity_text': 'INFO',
         'body.text': 'ES-direct probe',
         'trace.id': 'probe000',
-        'merchant.id': 'M-PROBE',
+        'trade.id': 'TRD-PROBE',
     }
     # paypal-otel-logs is a plain index — dynamic mapping, no ingest pipeline.
     # logs-apm.otel-default pipeline drops non-OTel docs while returning HTTP 200.
@@ -1558,25 +1521,35 @@ def probe_es_direct(es_url, api_key):
     return None
 
 TRANSACTION_NAMES = {
-    'checkout-service':      ['POST /api/checkout/initiate','POST /api/checkout/confirm','GET /api/checkout/status'],
-    'payments-orchestrator': ['POST /api/payments/authorize','POST /api/payments/capture','POST /api/payments/void'],
-    'fraud-decisioning':     ['POST /api/fraud/score','POST /api/fraud/review','GET /api/fraud/rules'],
-    'merchant-api':          ['GET /api/merchant/profile','PUT /api/merchant/settings','POST /api/merchant/verify'],
-    'settlement-service':    ['POST /api/settlement/batch','GET /api/settlement/status','POST /api/settlement/reconcile'],
-    'merchant-support-api':  ['POST /api/support/ticket','GET /api/support/case','PUT /api/support/escalate'],
-    'notification-service':  ['POST /api/notify/email','POST /api/notify/push','POST /api/notify/webhook'],
+    'order-gateway':        ['POST /api/order/new','GET /api/order/status','PUT /api/order/cancel'],
+    'matching-engine':      ['POST /api/match/execute','GET /api/book/snapshot','POST /api/fill/generate'],
+    'risk-calculator':      ['POST /api/risk/check','GET /api/var/calculate','POST /api/margin/validate'],
+    'market-data-feed':     ['GET /api/quote/latest','POST /api/feed/subscribe','GET /api/instrument/list'],
+    'settlement-processor': ['POST /api/settle/initiate','GET /api/settle/status','POST /api/netting/run'],
+    'fraud-detector':       ['POST /api/screen/transaction','GET /api/aml/status','POST /api/kyc/verify'],
+    'compliance-monitor':   ['POST /api/report/emir','GET /api/report/status','POST /api/audit/submit'],
+    'customer-portal':      ['GET /api/portfolio/view','POST /api/trade/confirm','GET /api/pnl/report'],
+    'audit-logger':         ['POST /api/event/log','GET /api/journal/read','POST /api/replicate/dr'],
 }
-# P99 latency baseline per service (ms) — used to generate realistic durations
+# P99 latency baseline per service (ms) — matching financial scenario characteristics
 SVC_LATENCY_MS = {
-    'checkout-service': 145, 'payments-orchestrator': 320, 'fraud-decisioning': 85,
-    'merchant-api': 45, 'settlement-service': 210, 'merchant-support-api': 60,
-    'notification-service': 30,
+    'order-gateway': 25,        # high-speed order intake
+    'matching-engine': 8,       # ultra-low latency matching
+    'risk-calculator': 180,     # complex VAR/margin calculations
+    'market-data-feed': 15,     # near-realtime feed processing
+    'settlement-processor': 420, # T+2 settlement batch operations
+    'fraud-detector': 95,       # ML inference latency
+    'compliance-monitor': 310,  # regulatory report generation
+    'customer-portal': 145,     # web tier latency
+    'audit-logger': 35,         # async write latency
 }
 
 def make_es_log_docs(svcs, n_per_svc=3):
-    """Generate PayPal-shaped telemetry docs for ES _bulk API.
+    """Generate financial-platform telemetry docs for ES _bulk API.
     Each doc includes log, trace, and RED metric fields for rich ES|QL queries."""
     from datetime import datetime, timezone
+    instruments = ['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'JPM', 'GS', 'FX.EURUSD', 'FUT.ES', 'FUT.NQ']
+    order_types = ['market', 'limit', 'stop', 'stop_limit', 'iceberg']
     docs = []
     for svc in svcs:
         msgs = LOG_MESSAGES.get(svc['name'], ['Processing request'])
@@ -1593,7 +1566,9 @@ def make_es_log_docs(svcs, n_per_svc=3):
                 'service.name': svc['name'],
                 'cloud.provider': svc['cloud'],
                 'cloud.region': svc['region'],
+                'cloud.platform': f"{svc['cloud']}_{'ec2' if svc['cloud']=='aws' else 'compute_engine' if svc['cloud']=='gcp' else 'vm'}",
                 'deployment.environment': 'production',
+                'subsystem': svc.get('subsystem', 'trading'),
                 'severity_text': 'ERROR' if is_error else random.choice(['INFO','INFO','WARN']),
                 'body.text': msg,
                 'trace.id': _rand_id(32),
@@ -1602,9 +1577,11 @@ def make_es_log_docs(svcs, n_per_svc=3):
                 'transaction.name': random.choice(txn_names),
                 'transaction.duration.us': duration_ms * 1000,
                 'http.response.status_code': http_status,
-                'merchant.id': f'M-{random.randint(10000,99999)}',
-                'merchant.tier': random.choice(['enterprise','business','standard']),
-                'payment.method': random.choice(['card','paypal_balance','bank','bnpl']),
+                'trade.id': f'TRD-{random.randint(1000000, 9999999)}',
+                'instrument': random.choice(instruments),
+                'order.type': random.choice(order_types),
+                'order.qty': random.randint(100, 50000),
+                'order.latency.us': max(10, int(random.gauss(base_ms * 1000, base_ms * 300))),
             })
     return docs
 
@@ -1781,8 +1758,8 @@ print(json.dumps(acts))
 fi
 
 # ── ML Anomaly Detection Jobs ─────────────────────────────────────────────────
-# Create 3 ML jobs that detect anomalies in PayPal merchant transactions.
-# Jobs run against logs-apm.otel-* once data starts flowing.
+# Create 3 ML jobs that detect anomalies in financial trading platform data.
+# Jobs run against paypal-otel-logs once data starts flowing.
 if [[ -n "$ES_URL" && -n "$ELASTICSEARCH_API_KEY" ]]; then
   echo "Creating PayPal ML anomaly detection jobs..."
 
@@ -1826,10 +1803,10 @@ if [[ -n "$ES_URL" && -n "$ELASTICSEARCH_API_KEY" ]]; then
       -d '{"start":"now-1h"}' || true
   }
 
-  # Job 1: Error spike per service — catches P1 incidents instantly
+  # Job 1: Error spike per service — catches P1 incidents (order book failures, SLA breaches)
   create_ml_job "paypal-service-error-spike" \
   '{
-    "description": "PayPal — detect error rate spikes per service (payment failures, 5xx storms)",
+    "description": "PayPal — detect error rate spikes per trading service (OMS failures, SLA breaches)",
     "analysis_config": {
       "bucket_span": "5m",
       "detectors": [{
@@ -1845,22 +1822,22 @@ if [[ -n "$ES_URL" && -n "$ELASTICSEARCH_API_KEY" ]]; then
   }' \
   "{
     \"job_id\": \"paypal-service-error-spike\",
-    \"indices\": [\"logs.otel\"],
+    \"indices\": [\"paypal-otel-logs\"],
     \"query\": {\"term\": {\"severity_text\": {\"value\": \"ERROR\"}}},
     \"scroll_size\": 1000,
     \"frequency\": \"1m\",
     \"query_delay\": \"60s\"
   }"
 
-  # Job 2: Transaction volume anomaly — catches traffic drops (outages) and surges (attacks)
-  create_ml_job "paypal-transaction-volume-anomaly" \
+  # Job 2: Trade volume anomaly — catches traffic drops (outages) and surges (market events)
+  create_ml_job "paypal-trade-volume-anomaly" \
   '{
-    "description": "PayPal — detect unusual transaction volumes per service (drops or surges)",
+    "description": "PayPal — detect unusual trade/order volumes (drops=outages, surges=market events)",
     "analysis_config": {
       "bucket_span": "5m",
       "detectors": [{
         "function": "count",
-        "detector_description": "Unusual transaction volume",
+        "detector_description": "Unusual trade volume",
         "partition_field_name": "service.name"
       }],
       "influencers": ["service.name"]
@@ -1870,23 +1847,23 @@ if [[ -n "$ES_URL" && -n "$ELASTICSEARCH_API_KEY" ]]; then
     "custom_settings": { "created_by": "paypal-elastic-serverless" }
   }' \
   "{
-    \"job_id\": \"paypal-transaction-volume-anomaly\",
-    \"indices\": [\"logs.otel\"],
+    \"job_id\": \"paypal-trade-volume-anomaly\",
+    \"indices\": [\"paypal-otel-logs\"],
     \"query\": {\"match_all\": {}},
     \"scroll_size\": 1000,
     \"frequency\": \"1m\",
     \"query_delay\": \"60s\"
   }"
 
-  # Job 3: Checkout service degradation — watches checkout-service + payments-orchestrator
-  create_ml_job "paypal-checkout-degradation" \
+  # Job 3: Matching engine + risk degradation — watches order execution pipeline
+  create_ml_job "paypal-trading-pipeline-degradation" \
   '{
-    "description": "PayPal — detect checkout and payment orchestration degradation",
+    "description": "PayPal — detect order gateway, matching engine, and risk calculator degradation",
     "analysis_config": {
       "bucket_span": "5m",
       "detectors": [{
         "function": "high_count",
-        "detector_description": "Error surge in checkout pipeline",
+        "detector_description": "Error surge in trading pipeline",
         "partition_field_name": "service.name"
       }],
       "influencers": ["service.name"]
@@ -1896,11 +1873,11 @@ if [[ -n "$ES_URL" && -n "$ELASTICSEARCH_API_KEY" ]]; then
     "custom_settings": { "created_by": "paypal-elastic-serverless" }
   }' \
   "{
-    \"job_id\": \"paypal-checkout-degradation\",
-    \"indices\": [\"logs.otel\"],
+    \"job_id\": \"paypal-trading-pipeline-degradation\",
+    \"indices\": [\"paypal-otel-logs\"],
     \"query\": {
       \"terms\": {
-        \"service.name\": [\"checkout-service\", \"payments-orchestrator\", \"fraud-decisioning\", \"merchant-api\"]
+        \"service.name\": [\"order-gateway\", \"matching-engine\", \"risk-calculator\", \"market-data-feed\"]
       }
     },
     \"scroll_size\": 1000,
@@ -2043,9 +2020,8 @@ echo "  demo-chaos         — show chaos channel status"
 echo "  demo-restart       — restart the demo app"
 
 # ── PayPal Alert Rules (query paypal-otel-logs) ───────────────────────────────
-# The Fanatics scenario created 20 alert rules pointing at empty APM data streams.
-# We add PayPal-specific rules that query paypal-otel-logs and actually fire
-# when the Chaos Controller injects a payment fault.
+# Create PayPal/Financial-specific alert rules that query paypal-otel-logs and fire
+# when the Chaos Controller injects trading/payment faults.
 if [[ -n "$KIBANA_URL" && -n "$BASE64" ]]; then
   echo "Creating PayPal alert rules..."
 
@@ -2093,11 +2069,88 @@ RULES = [
             'alertOnGroupDisappear': False,
         },
         'actions': [],
-        'tags': ['paypal', 'error-rate'],
+        'tags': ['paypal', 'financial', 'error-rate'],
         'notify_when': 'onActionGroupChange',
     },
     {
-        'name': 'PayPal — High Latency P99 (any service)',
+        'name': 'PayPal — Matching Engine Latency SLA Breach',
+        'rule_type_id': 'observability.rules.custom_threshold',
+        'consumer': 'logs',
+        'schedule': {'interval': '1m'},
+        'params': {
+            'criteria': [{
+                'comparator': '>', 'threshold': [500],
+                'timeSize': 5, 'timeUnit': 'm',
+                'metrics': [{
+                    'name': 'A',
+                    'filter': 'service.name: "matching-engine" AND transaction.duration.us: *',
+                    'aggType': 'max',
+                    'field': 'transaction.duration.us',
+                }],
+                'equation': 'A / 1000',
+            }],
+            'searchConfiguration': {
+                'index': 'paypal-otel-logs',
+                'query': {'query': 'service.name: "matching-engine"', 'language': 'kuery'},
+            },
+            'groupBy': [],
+            'alertOnNoData': False,
+            'alertOnGroupDisappear': False,
+        },
+        'actions': [],
+        'tags': ['paypal', 'financial', 'matching-engine', 'latency'],
+        'notify_when': 'onActionGroupChange',
+    },
+    {
+        'name': 'PayPal — Order Gateway Error Spike',
+        'rule_type_id': 'observability.rules.custom_threshold',
+        'consumer': 'logs',
+        'schedule': {'interval': '1m'},
+        'params': {
+            'criteria': [{
+                'comparator': '>', 'threshold': [5],
+                'timeSize': 5, 'timeUnit': 'm',
+                'metrics': [{'name': 'A', 'filter': 'severity_text: "ERROR" AND service.name: "order-gateway"', 'aggType': 'count'}],
+                'equation': 'A',
+            }],
+            'searchConfiguration': {
+                'index': 'paypal-otel-logs',
+                'query': {'query': 'service.name: "order-gateway"', 'language': 'kuery'},
+            },
+            'groupBy': [],
+            'alertOnNoData': False,
+            'alertOnGroupDisappear': False,
+        },
+        'actions': [],
+        'tags': ['paypal', 'financial', 'order-gateway', 'error-rate'],
+        'notify_when': 'onActionGroupChange',
+    },
+    {
+        'name': 'PayPal — Settlement Processor Timeout',
+        'rule_type_id': 'observability.rules.custom_threshold',
+        'consumer': 'logs',
+        'schedule': {'interval': '1m'},
+        'params': {
+            'criteria': [{
+                'comparator': '>', 'threshold': [3],
+                'timeSize': 5, 'timeUnit': 'm',
+                'metrics': [{'name': 'A', 'filter': 'severity_text: "ERROR" AND service.name: "settlement-processor"', 'aggType': 'count'}],
+                'equation': 'A',
+            }],
+            'searchConfiguration': {
+                'index': 'paypal-otel-logs',
+                'query': {'query': 'service.name: "settlement-processor"', 'language': 'kuery'},
+            },
+            'groupBy': [],
+            'alertOnNoData': False,
+            'alertOnGroupDisappear': False,
+        },
+        'actions': [],
+        'tags': ['paypal', 'financial', 'settlement', 'error-rate'],
+        'notify_when': 'onActionGroupChange',
+    },
+    {
+        'name': 'PayPal — Risk Calculator Limit Breach',
         'rule_type_id': 'observability.rules.custom_threshold',
         'consumer': 'logs',
         'schedule': {'interval': '1m'},
@@ -2106,99 +2159,22 @@ RULES = [
                 'comparator': '>', 'threshold': [2000],
                 'timeSize': 5, 'timeUnit': 'm',
                 'metrics': [{
-                    'name': 'A',
-                    'filter': 'transaction.duration.us: *',
-                    'aggType': 'max',
-                    'field': 'transaction.duration.us',
-                }],
-                'equation': 'A / 1000',
-            }],
-            'searchConfiguration': {
-                'index': 'paypal-otel-logs',
-                'query': {'query': '', 'language': 'kuery'},
-            },
-            'groupBy': ['service.name'],
-            'alertOnNoData': False,
-            'alertOnGroupDisappear': False,
-        },
-        'actions': [],
-        'tags': ['paypal', 'latency'],
-        'notify_when': 'onActionGroupChange',
-    },
-    {
-        'name': 'PayPal — Error Rate Spike (checkout-service)',
-        'rule_type_id': 'observability.rules.custom_threshold',
-        'consumer': 'logs',
-        'schedule': {'interval': '1m'},
-        'params': {
-            'criteria': [{
-                'comparator': '>', 'threshold': [5],
-                'timeSize': 5, 'timeUnit': 'm',
-                'metrics': [{'name': 'A', 'filter': 'severity_text: "ERROR" AND service.name: "checkout-service"', 'aggType': 'count'}],
-                'equation': 'A',
-            }],
-            'searchConfiguration': {
-                'index': 'paypal-otel-logs',
-                'query': {'query': 'service.name: "checkout-service"', 'language': 'kuery'},
-            },
-            'groupBy': [],
-            'alertOnNoData': False,
-            'alertOnGroupDisappear': False,
-        },
-        'actions': [],
-        'tags': ['paypal', 'checkout', 'error-rate'],
-        'notify_when': 'onActionGroupChange',
-    },
-    {
-        'name': 'PayPal — Payments Orchestrator Error Spike',
-        'rule_type_id': 'observability.rules.custom_threshold',
-        'consumer': 'logs',
-        'schedule': {'interval': '1m'},
-        'params': {
-            'criteria': [{
-                'comparator': '>', 'threshold': [5],
-                'timeSize': 5, 'timeUnit': 'm',
-                'metrics': [{'name': 'A', 'filter': 'severity_text: "ERROR" AND service.name: "payments-orchestrator"', 'aggType': 'count'}],
-                'equation': 'A',
-            }],
-            'searchConfiguration': {
-                'index': 'paypal-otel-logs',
-                'query': {'query': 'service.name: "payments-orchestrator"', 'language': 'kuery'},
-            },
-            'groupBy': [],
-            'alertOnNoData': False,
-            'alertOnGroupDisappear': False,
-        },
-        'actions': [],
-        'tags': ['paypal', 'payments', 'error-rate'],
-        'notify_when': 'onActionGroupChange',
-    },
-    {
-        'name': 'PayPal — Fraud Decisioning Latency Spike',
-        'rule_type_id': 'observability.rules.custom_threshold',
-        'consumer': 'logs',
-        'schedule': {'interval': '1m'},
-        'params': {
-            'criteria': [{
-                'comparator': '>', 'threshold': [3000],
-                'timeSize': 5, 'timeUnit': 'm',
-                'metrics': [{
                     'name': 'A', 'aggType': 'max',
                     'field': 'transaction.duration.us',
-                    'filter': 'service.name: "fraud-decisioning"',
+                    'filter': 'service.name: "risk-calculator"',
                 }],
                 'equation': 'A / 1000',
             }],
             'searchConfiguration': {
                 'index': 'paypal-otel-logs',
-                'query': {'query': 'service.name: "fraud-decisioning"', 'language': 'kuery'},
+                'query': {'query': 'service.name: "risk-calculator"', 'language': 'kuery'},
             },
             'groupBy': [],
             'alertOnNoData': False,
             'alertOnGroupDisappear': False,
         },
         'actions': [],
-        'tags': ['paypal', 'fraud', 'latency'],
+        'tags': ['paypal', 'financial', 'risk', 'latency'],
         'notify_when': 'onActionGroupChange',
     },
 ]
@@ -2237,25 +2213,25 @@ KIBANA = '${KIBANA_URL}'
 AUTH   = 'Basic ${BASE64}'
 CTX    = ssl.create_default_context()
 
-SCENARIO_NAME = "PayPal Merchant Observability"
+SCENARIO_NAME = "PayPal Payments Platform"
 DASHBOARD_ID  = "paypal-exec-dashboard"
 
 CLOUD_GROUPS = [
     {"label": "**AWS** us-east-1",   "x_start": 0,  "col_width": 15, "cluster": "paypal-aws-us-east-1",
-     "services": ["merchant-api", "checkout-service", "payments-orchestrator"]},
+     "services": ["order-gateway", "matching-engine", "risk-calculator"]},
     {"label": "**GCP** us-central1", "x_start": 16, "col_width": 16, "cluster": "paypal-gcp-us-central1",
-     "services": ["fraud-decisioning", "settlement-service"]},
+     "services": ["market-data-feed", "settlement-processor", "fraud-detector"]},
     {"label": "**Azure** eastus",    "x_start": 33, "col_width": 15, "cluster": "paypal-azure-eastus",
-     "services": ["merchant-support-api", "notification-service"]},
+     "services": ["compliance-monitor", "customer-portal", "audit-logger"]},
 ]
 
 ERROR_TYPES = [
-    "Authentication failed for merchant",
-    "Authorization timeout",
-    "High-risk signal detected",
-    "SLA breach detected",
-    "Payment declined by issuer",
-    "Routing table miss",
+    "OMS-BOOK-IMBALANCE: order rejected",
+    "ME-LATENCY-SLA: processing time exceeded",
+    "RISK-LIMIT-BREACH: exposure exceeded",
+    "SETTLE-T2-TIMEOUT: settlement overdue",
+    "COMPL-FRAUD-FP-STORM: false positive surge",
+    "AUDIT-SEQ-GAP: missing sequence",
 ]
 
 DATA_VIEW_ID_LOGS    = "logs*"
@@ -2765,10 +2741,12 @@ workflow = {
     'name': 'SLO Management and Service Evaluation Workflow',
     'enabled': True,
     'description': (
-        'Automatically evaluates all services and creates SLOs with relaxed targets. '
+        'Automatically evaluates all 9 financial platform services and creates SLOs. '
         'Runs every 24 hours. IDEMPOTENT: Deletes all existing SLOs matching '
         'Availability/Latency/Error Rate names, then creates 3 standard grouped SLOs. '
-        'groupBy: service.name produces one SLO instance per PayPal service automatically. '
+        'groupBy: service.name produces one SLO per service: order-gateway, matching-engine, '
+        'risk-calculator, market-data-feed, settlement-processor, fraud-detector, '
+        'compliance-monitor, customer-portal, audit-logger. '
         'SLO Targets: Availability 95%, Error Rate 95%, Latency 85% under 2s.'
     ),
     'triggers': [

@@ -42,9 +42,9 @@ if [[ "$TRIGGERED_COUNT" -ge 1 ]]; then
 else
   fail "No fault has been injected yet.
 
-Go to the Demo App tab → Chaos Controller and click one of the payment incident buttons (Payments Orchestrator Timeout, Fraud Decisioning Latency Spike, or Merchant API Auth Failure).
+Go to the Demo App tab → Chaos Controller (Market Disruption Simulator) and select one of the 20 financial fault channels — e.g., 'Order Book Inconsistency', 'Matching Engine Latency', or 'Risk Limit Breach'.
 
-Then return here and click Check."
+Then click Inject Fault and return here to click Check."
 fi
 
 # ── Verify elevated errors in ES (the fault generated real data) ──────────────
@@ -76,5 +76,5 @@ if [[ -n "$ES_URL" && -n "$API_KEY" ]]; then
 fi
 
 echo ""
-echo "🎉 Payment incident confirmed. Elastic detected the fault and the autonomous workflow is executing remediation."
+echo "🎉 Trading incident confirmed. Elastic detected the fault and the autonomous workflow is executing remediation."
 exit 0

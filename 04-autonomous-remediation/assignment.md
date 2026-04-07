@@ -1,201 +1,201 @@
 ---
 slug: autonomous-remediation
-id: txxh8fjd5e75
+id: xyzabc123def
 type: challenge
-title: Autonomous Investigation & Remediation
-teaser: Trigger a complex incident and watch Elastic's AI Agent and Workflows automatically
-  investigate, correlate, and remediate without human intervention.
+title: Autonomous Remediation — AI-Driven Incident Response
+teaser: Resolve the financial fault and explore how Elastic's AI and ML deliver autonomous remediation for PayPal-scale trading operations.
 notes:
-- type: text
-  contents: |
-    ## Autonomous Observability at PayPal Scale
+  - type: text
+    contents: |
+      ## Autonomous Remediation
 
-    At PayPal, incidents happen at any hour across a global, multi-cloud platform. The mean time to detect (MTTD) and mean time to resolve (MTTR) are directly tied to merchant GMV impact.
+      You've observed a fault cascade across the trading pipeline. Now it's time to resolve it and explore how Elastic's built-in AI and ML capabilities can autonomously detect, diagnose, and remediate financial incidents.
 
-    **The challenge:** Traditional alert → human → investigate → resolve loops are too slow at scale.
-
-    **The Elastic answer:** Autonomous workflows that trigger automatically on alert conditions, run investigation playbooks against live telemetry, and execute remediation steps — all without waking up an SRE at 3 AM.
-
-    In this challenge, you'll trigger a multi-service incident and observe the Elastic AI Agent and Workflows handling the full investigation and remediation lifecycle.
-- type: text
-  contents: |
-    ## Elastic Workflows: Alert → Investigate → Remediate
-
-    Elastic Workflows are event-driven automation pipelines built directly into the Elastic platform.
-
-    **For PayPal, a typical workflow might:**
-    1. Trigger on: `error_rate > 5%` for `checkout-service` sustained for 2 minutes
-    2. Investigate: Run ES|QL to identify affected merchant cohort and root cause service
-    3. Correlate: Pull the distributed trace for the highest-impact transaction
-    4. Notify: Send a Slack alert with pre-populated incident context
-    5. Remediate: Trigger a circuit breaker reset or scale-out action via webhook
-
-    The entire cycle runs in seconds — not the minutes or hours it takes with manual investigation.
+      **In this challenge:**
+      - Resolve the active fault channels
+      - Explore ML anomaly job results
+      - Review SLO burn rates
+      - Use the AI Assistant for deep RCA
+      - Understand the autonomous workflow architecture
 tabs:
-- id: rgehg1r7tdor
-  title: Terminal
-  type: terminal
-  hostname: es3-api
-- id: d8fldomxjrix
-  title: Demo App
-  type: service
-  hostname: es3-api
-  path: /home
-  port: 8090
-- id: cx7pccogcrsi
-  title: Elastic Serverless
-  type: service
-  hostname: es3-api
-  path: /app/observability/alerts?_g=(filters:!(),refreshInterval:(pause:!f,value:10000),time:(from:now-1h,to:now))
-  port: 8080
-  custom_request_headers:
-  - key: Content-Security-Policy
-    value: 'script-src ''self'' https://kibana.estccdn.com; worker-src blob: ''self'';
-      style-src ''unsafe-inline'' ''self'' https://kibana.estccdn.com; style-src-elem
-      ''unsafe-inline'' ''self'' https://kibana.estccdn.com'
-  custom_response_headers:
-  - key: Content-Security-Policy
-    value: 'script-src ''self'' https://kibana.estccdn.com; worker-src blob: ''self'';
-      style-src ''unsafe-inline'' ''self'' https://kibana.estccdn.com; style-src-elem
-      ''unsafe-inline'' ''self'' https://kibana.estccdn.com'
+  - id: 1bvf5tqoejoy
+    title: Demo App
+    type: service
+    hostname: es3-api
+    port: 8080
+    new_window: true
+  - id: 4jnxpfyebyjl
+    title: Elastic Serverless
+    type: service
+    hostname: es3-api
+    path: /app/observability/alerts?_g=(filters:!(),refreshInterval:(pause:!f,value:30000),time:(from:now-30m,to:now))
+    port: 8080
+    new_window: true
+  - id: 7k2mplqavjol
+    title: Terminal
+    type: terminal
+    hostname: es3-api
 difficulty: basic
-timelimit: 0
-enhanced_loading: null
+timelimit: 1200
 ---
 
-# Autonomous Investigation & Remediation
+# Challenge 4 — Autonomous Remediation
 
-Trigger a high-impact payment incident and observe Elastic's AI Agent and Workflows executing the full investigation and remediation lifecycle.
+## Step 1 — Resolve the Fault
 
----
+In the **Demo App** tab → **Chaos Controller**:
+1. Find the active fault channel (e.g., Channel 1 — Order Book Inconsistency)
+2. Click **Resolve** to clear the fault
+3. Observe the service health tiles return to green
 
-## Step 1 — Trigger a Multi-Service Incident
-
-Click **Demo App** → **Chaos Controller**. Activate a complex incident such as:
-- **Checkout Latency Spike — High Value Merchants**
-- **Payment Authorization Failure Spike**
-- **Cross-Region Payment Routing Failure**
-
-These scenarios cascade across multiple services, creating the kind of complex, ambiguous failure that is hardest to diagnose manually.
+The matching engine's order book is now re-synced. Watch the error rate drop in real-time.
 
 ---
 
-## Step 2 — Watch the AI Agent Investigate
+## Step 2 — Recovery Telemetry Analysis
 
-Click **Elastic Serverless** → **Observability** → **Alerts**.
+In **Elastic Serverless → Discover** (ES|QL mode):
 
-When an alert fires, click it and look for the **AI Investigation** panel. The AI Agent will:
-1. Query the affected service's recent error logs
-2. Correlate with metrics to identify the performance degradation pattern
-3. Pull distributed traces to find the root cause service
-4. Generate a plain-language incident summary with recommended actions
-
----
-
-## Step 3 — Review ML Anomaly Detection
-
-Elastic's machine learning jobs are continuously scanning your PayPal transaction telemetry for anomalies.
-
-In Kibana, go to **Machine Learning** → **Anomaly Detection** (left nav, under **Analytics**). You'll see three pre-configured jobs:
-
-| Job | What it detects |
-|---|---|
-| `paypal-service-error-spike` | Unusually high error rates per service — catches P1 payment failures |
-| `paypal-transaction-volume-anomaly` | Traffic drops or surges per service — catches outages and attack patterns |
-| `paypal-checkout-degradation` | Error surges specifically in the checkout → payments → fraud pipeline |
-
-Click any job → **View results** → **Anomaly Explorer** to see the anomaly swimlane and severity scores. Inject a fault in the **Demo App** and watch the ML model flag it as an anomaly in real time.
-
----
-
-## Step 4 — Review the Elastic Workflow Execution
-
-In Kibana, go to **Stack Management** → **Rules** (or **Observability** → **Rules**) to see the pre-configured alert rules. Each rule is linked to a Workflow that runs on trigger.
-
-Click any triggered rule to see the workflow execution log — each step is recorded with input, output, and timing.
-
----
-
-## Step 4 — Run the Investigation Yourself
-
-Practice the full ES|QL-based incident investigation workflow.
-
-Error surge by service in the last 10 minutes:
-
+**Observe the recovery — error rate should be dropping:**
 ```esql
 FROM paypal-otel-logs
-| WHERE @timestamp > NOW() - 10 MINUTES
-| WHERE severity_text IN ("ERROR", "CRITICAL")
-| STATS errors = COUNT(*), unique_traces = COUNT_DISTINCT(trace.id) BY service.name
+| WHERE @timestamp > NOW() - 30 minutes
+| STATS errors = COUNT(*) WHERE severity_text == "ERROR"
+  BY service.name, bucket = DATE_TRUNC(2 minutes, @timestamp)
+| SORT bucket DESC, errors DESC
+| LIMIT 30
+```
+
+**Full incident timeline — what happened and when:**
+```esql
+FROM paypal-otel-logs
+| WHERE severity_text == "ERROR"
+| STATS
+    first_error = MIN(@timestamp),
+    last_error = MAX(@timestamp),
+    peak_errors = COUNT(*)
+  BY service.name
+| SORT peak_errors DESC
+```
+
+**Latency recovery — confirm matching engine is back within SLA:**
+```esql
+FROM paypal-otel-logs
+| WHERE service.name == "matching-engine" AND transaction.duration.us IS NOT NULL
+| STATS p99_ms = PERCENTILE(transaction.duration.us, 99) / 1000
+  BY bucket = DATE_TRUNC(2 minutes, @timestamp)
+| SORT bucket DESC
+| LIMIT 15
+```
+
+---
+
+## Step 3 — ML Anomaly Detection Review
+
+Navigate to **Kibana → Machine Learning → Anomaly Detection**.
+
+Review the three anomaly jobs:
+
+| Job | Purpose | Expected Anomaly Score |
+|-----|---------|----------------------|
+| `paypal-service-error-spike` | Error rate spikes per service | High during fault |
+| `paypal-trade-volume-anomaly` | Order volume drops or surges | Medium during fault |
+| `paypal-trading-pipeline-degradation` | Order gateway + matching engine | High during fault |
+
+Ask the AI Assistant to explain the anomaly:
+
+> "The ML job paypal-service-error-spike detected an anomaly in the order-gateway service. Explain what this means and what it tells us about the health of the trading pipeline."
+
+---
+
+## Step 4 — SLO Burn Rate Analysis
+
+Navigate to **Kibana → Observability → SLOs**.
+
+Review the three SLOs created for the financial platform:
+
+| SLO | Target | Indicator |
+|-----|--------|-----------|
+| **Availability SLO** | 95% | NOT event.outcome:failure |
+| **Latency SLO** | 85% requests < 2s | transaction.duration.us ≤ 2,000,000 |
+| **Error Rate SLO** | 95% | NOT event.outcome:failure |
+
+Check the **burn rate** for each SLO — did the fault burn into our error budget?
+
+---
+
+## Step 5 — Advanced ES|QL Analytics
+
+**Build an incident MTTR report:**
+```esql
+FROM paypal-otel-logs
+| STATS
+    total_events = COUNT(*),
+    error_events = COUNT(*) WHERE severity_text == "ERROR",
+    services_affected = COUNT_DISTINCT(service.name) WHERE severity_text == "ERROR"
+| EVAL overall_error_rate = ROUND(error_events * 100.0 / total_events, 2)
+```
+
+**Cross-cloud incident impact (did one cloud provider take more errors?):**
+```esql
+FROM paypal-otel-logs
+| STATS
+    total = COUNT(*),
+    errors = COUNT(*) WHERE severity_text == "ERROR"
+  BY cloud.provider
+| EVAL error_rate = ROUND(errors * 100.0 / total, 2)
+| SORT error_rate DESC
+```
+
+**Settlement impact — did any T+2 settlements miss their deadline?**
+```esql
+FROM paypal-otel-logs
+| WHERE service.name == "settlement-processor" AND severity_text == "ERROR"
+| STATS count = COUNT(*), error_types = VALUES(body.text) BY service.name
+```
+
+**Order types most impacted during fault:**
+```esql
+FROM paypal-otel-logs
+| WHERE severity_text == "ERROR" AND order.type IS NOT NULL
+| STATS errors = COUNT(*) BY order.type
 | SORT errors DESC
 ```
 
-Recent error log messages from the top affected service:
+---
 
-```esql
-FROM paypal-otel-logs
-| WHERE @timestamp > NOW() - 10 MINUTES AND severity_text == "ERROR"
-| KEEP @timestamp, service.name, body.text, trace.id
-| SORT @timestamp DESC
-| LIMIT 25
-```
+## Step 6 — AI-Powered Root Cause Analysis
 
-Error rate trend over time (spot the fault injection spike):
+Ask the Elastic AI Assistant these questions for a complete executive summary:
 
-```esql
-FROM paypal-otel-logs
-| WHERE @timestamp > NOW() - 30 MINUTES
-| WHERE severity_text == "ERROR"
-| STATS errors = COUNT(*) BY service.name, BUCKET(@timestamp, 1 minute)
-| SORT @timestamp DESC
-```
+> "Generate a complete incident report for the last 30 minutes from paypal-otel-logs. Include: services affected, peak error rates, latency impact, estimated duration, and recommended preventive measures."
+
+> "Based on the telemetry in paypal-otel-logs, did the order-gateway fault cascade to the matching-engine and risk-calculator? Show evidence from the data."
+
+> "What Elastic features (ML anomaly detection, SLOs, alerting, workflows) would provide the fastest time-to-detect for an OMS-BOOK-IMBALANCE event? Recommend an optimal monitoring setup."
+
+> "Compare PayPal's current CAL logging architecture vs. the OpenTelemetry + Elastic Serverless approach demonstrated here. What are the top 3 operational benefits for PayPal's financial platform?"
 
 ---
 
-## Step 5 — Ask the AI Agent for the Full Story
+## Step 7 — The Autonomous Architecture
 
-Open the **AI Assistant** in Kibana and copy/paste these questions to close the loop on the entire observability journey:
+**How Elastic enables zero-touch remediation for PayPal:**
 
-```
-Walk me through everything that happened during the incident we just simulated — detection, root cause, remediation, and recovery.
-```
+1. **Detection** — ML anomaly jobs detect error spikes within 1 bucket span (5 minutes)
+2. **Alerting** — Custom threshold rules fire immediately when errors exceed baseline
+3. **AI Diagnosis** — AI Assistant provides instant root cause analysis across all 9 services
+4. **Workflows** — Automated remediation: circuit breakers, incident tickets, runbook execution
+5. **SLO Tracking** — Real-time burn rate monitoring with proactive escalation
 
-```
-What is the current SLO status for each of the 7 PayPal services? Which services are at risk?
-```
-
-```
-Based on the last 30 minutes of telemetry, which services are the most likely candidates for a future incident?
-```
-
-```
-If PayPal adopted Elastic Serverless to replace CAL, what would the top 3 operational benefits be based on what you can see in this environment?
-```
-
-```
-Generate an executive briefing for PayPal leadership that summarizes the value of this observability platform in 3 bullet points.
-```
-
-```
-How would you build a SLO for the checkout-service with a 99.9% error rate target using what you see in this Elastic environment?
-```
-
-```
-The ML anomaly detection jobs just ran — which service shows the highest anomaly score and what does that suggest about the health of the payment pipeline?
-```
-
-These questions are intentionally executive and forward-looking — ideal for running live in a customer presentation to show Elastic AI reasoning over real PayPal-shaped data.
+This replaces the manual, CAL-dependent process that required 3–5 systems and 30+ minutes to diagnose.
 
 ---
 
-## Step 6 — Executive Summary
+## ✅ Completion Check
 
-The PayPal Merchant Observability platform you've just explored delivers:
-
-- **CAL replacement** with OTel semantic conventions — no proprietary schema
-- **Unified signals** — logs, metrics, and traces in one query engine
-- **Service-centric investigation** — `service.name`, `trace.id`, `body.text` queryable together
-- **High-cardinality telemetry** — ES|QL handles millions of spans and log events without pre-aggregation
-- **ML anomaly detection** — Unsupervised models learn normal baselines and alert on deviations automatically
-- **Autonomous response** — AI Agent + Workflows reduce MTTR without human intervention
-- **Zero-ops infrastructure** — Elastic Serverless scales automatically, no cluster management
+You'll pass this challenge when:
+- The demo app is healthy
+- The generator is still running
+- No active fault channels remain
+- Substantial telemetry has accumulated in `paypal-otel-logs`

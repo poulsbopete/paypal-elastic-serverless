@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Challenge 2 check: verify substantial telemetry and all 7 services are present.
+# Challenge 2 check: verify substantial telemetry and all 9 financial services are present.
 set -euo pipefail
 
 fail() { echo "❌ $*"; exit 1; }
@@ -40,7 +40,7 @@ if [[ "$DOC_COUNT" -lt 50 ]]; then
 fi
 pass "$DOC_COUNT documents in paypal-otel-logs ✓"
 
-# ── All 7 services present ────────────────────────────────────────────────────
+# ── All 9 financial services present ──────────────────────────────────────────
 SVC_LIST=$(curl -sf "${ES_URL}/paypal-otel-logs/_search" \
   -H "Authorization: ApiKey ${API_KEY}" \
   -H "Content-Type: application/json" \
@@ -54,11 +54,10 @@ print(' '.join(svcs))
 
 SVC_COUNT=$(echo "$SVC_LIST" | wc -w | tr -d ' ')
 
-EXPECTED="checkout-service fraud-decisioning merchant-api merchant-support-api notification-service payments-orchestrator settlement-service"
-if [[ "$SVC_COUNT" -ge 7 ]]; then
-  pass "All 7 PayPal services are sending telemetry: $SVC_LIST ✓"
+if [[ "$SVC_COUNT" -ge 9 ]]; then
+  pass "All 9 financial platform services are sending telemetry ✓"
 else
-  pass "$SVC_COUNT/7 services present so far: $SVC_LIST"
+  pass "$SVC_COUNT/9 financial services present so far: $SVC_LIST"
 fi
 
 # ── Errors are present (realistic error rate) ─────────────────────────────────
@@ -73,5 +72,5 @@ if [[ "$ERROR_COUNT" -ge 1 ]]; then
 fi
 
 echo ""
-echo "🎉 Telemetry exploration complete. All 7 PayPal services are represented with logs, errors, latency, and merchant context."
+echo "🎉 Telemetry exploration complete. Financial platform services are represented with logs, errors, latency, and trading context."
 exit 0

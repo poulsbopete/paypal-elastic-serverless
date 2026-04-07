@@ -2,189 +2,185 @@
 slug: explore-telemetry
 id: eqaxxn8koq3y
 type: challenge
-title: CAL Log Replacement — Explore OTel Telemetry
-teaser: Query merchant logs, traces, and metrics using ES|QL to experience how OpenTelemetry
-  replaces CAL with a unified, queryable schema.
+title: Explore Telemetry — Trading Platform Observability
+teaser: Investigate order flow, latency, and risk events across 9 financial services using ES|QL.
 notes:
-- type: text
-  contents: |
-    ## Why CAL Needs Replacing
+  - type: text
+    contents: |
+      ## Explore Financial Platform Telemetry
 
-    CAL has served PayPal well, but it was designed for a different era. When a merchant opens a support ticket about a failed transaction, a PayPal SRE today must:
+      You now have live data from 9 trading services. In this challenge you'll use ES|QL to explore the full observability picture — order flow, latency distribution, error patterns, and subsystem health.
 
-    1. Find the transaction ID in CAL logs (specialist query syntax required)
-    2. Switch to a separate trace tool to correlate the log to a distributed trace
-    3. Cross-reference yet another tool for service metrics
-    4. Manually reconstruct the timeline across all three
-
-    With Elastic + OTel, all three signal types share the same schema. `trace.id` is native. `merchant.id` is a first-class attribute. One query engine handles everything.
-- type: text
-  contents: |
-    ## OTel Semantic Conventions at PayPal
-
-    OpenTelemetry semantic conventions provide a shared field vocabulary across all services:
-
-    | Field | Meaning | Example |
-    |---|---|---|
-    | `service.name` | Which microservice emitted this signal | `checkout-service` |
-    | `trace.id` | Distributed trace spanning all services | `4f8a2c...` |
-    | `span.name` | The operation name within a service | `POST /api/checkout` |
-    | `severity_text` | Log level | `ERROR` |
-    | `cloud.region` | Where the service is running | `us-east-1` |
-    | `http.response.status_code` | HTTP response code | `503` |
-    | `transaction.name` | Transaction type being processed | `checkout.initiate` |
-
-    Every service in this lab emits all of these fields automatically via OTel SDK auto-instrumentation.
+      This is what replacing CAL looks like: **one query language across all signals**.
 tabs:
-- id: l4xw8tzn8iec
-  title: Terminal
-  type: terminal
-  hostname: es3-api
-- id: rtkpw3ta6y5i
-  title: Demo App
-  type: service
-  hostname: es3-api
-  path: /home
-  port: 8090
-- id: dbuch240epcz
-  title: Elastic Serverless
-  type: service
-  hostname: es3-api
-  path: /app/dashboards#/view/paypal-merchant-observability-dashboard?_g=(filters:!(),refreshInterval:(pause:!f,value:10000),time:(from:now-1h,to:now))
-  port: 8080
-  custom_request_headers:
-  - key: Content-Security-Policy
-    value: 'script-src ''self'' https://kibana.estccdn.com; worker-src blob: ''self'';
-      style-src ''unsafe-inline'' ''self'' https://kibana.estccdn.com; style-src-elem
-      ''unsafe-inline'' ''self'' https://kibana.estccdn.com'
-  custom_response_headers:
-  - key: Content-Security-Policy
-    value: 'script-src ''self'' https://kibana.estccdn.com; worker-src blob: ''self'';
-      style-src ''unsafe-inline'' ''self'' https://kibana.estccdn.com; style-src-elem
-      ''unsafe-inline'' ''self'' https://kibana.estccdn.com'
+  - id: 1bvf5tqoejoy
+    title: Demo App
+    type: service
+    hostname: es3-api
+    port: 8080
+    new_window: true
+  - id: 4jnxpfyebyjl
+    title: Elastic Serverless
+    type: service
+    hostname: es3-api
+    path: /app/dashboards#/list?_g=(filters:!(),refreshInterval:(pause:!f,value:30000),time:(from:now-30m,to:now))
+    port: 8080
+    new_window: true
+  - id: 7k2mplqavjol
+    title: Terminal
+    type: terminal
+    hostname: es3-api
 difficulty: basic
-timelimit: 0
-enhanced_loading: null
+timelimit: 1200
 ---
 
-# CAL Log Replacement — Explore Live OTel Telemetry
+# Challenge 2 — Explore Financial Platform Telemetry
 
-With live OTLP telemetry flowing from all 7 PayPal microservices, let's demonstrate what CAL replacement looks like in practice.
+## The Story
+
+The PayPal Operations Center is live. 9 financial platform services are emitting telemetry: order-gateway and matching-engine handling trades on AWS, fraud-detector and settlement-processor processing on GCP, and compliance-monitor and audit-logger running on Azure.
+
+Your task: explore the data using ES|QL and understand the platform's health.
 
 ---
 
-## Step 1 — Find Errors Across All Services
+## Step 1 — Order Flow Analysis
 
-Open the **Elastic Serverless** tab → **Discover**. In Discover, select **ES|QL** as the query language (top left). The PayPal telemetry lives in the `paypal-otel-logs` index.
+In **Elastic Serverless → Analytics → Discover**, switch to ES|QL mode and run:
 
-First, confirm data is flowing with this count query:
-
+**Order volume by service and subsystem:**
 ```esql
 FROM paypal-otel-logs
-| STATS total = COUNT(*), services = COUNT_DISTINCT(service.name)
+| STATS trades = COUNT(*) BY service.name, subsystem
+| SORT trades DESC
 ```
 
-You should see a non-zero `total` and `services = 7`.
+**Distributed trace reconstruction — follow an order through the system:**
+```esql
+FROM paypal-otel-logs
+| WHERE transaction.name LIKE "*order*"
+| STATS span_count = COUNT(*), avg_latency_ms = AVG(transaction.duration.us) / 1000 BY service.name, transaction.name
+| SORT avg_latency_ms DESC
+```
 
-> **If you see "Unknown column" or "No results":** Run `otel-logs` in the **Terminal** tab — you should see `Sent logs for 7 services` every 5 seconds. If it shows `HTTP 200 ✓`, wait 30 seconds and retry the ES|QL query.
+**Order gateway throughput over time:**
+```esql
+FROM paypal-otel-logs
+| WHERE service.name == "order-gateway"
+| STATS orders = COUNT(*) BY bucket = DATE_TRUNC(1 minute, @timestamp)
+| SORT bucket DESC
+| LIMIT 30
+```
 
-Now run this query to see errors by service:
+---
 
+## Step 2 — Latency & Performance
+
+**P99 latency by service — identify SLA breaches:**
+```esql
+FROM paypal-otel-logs
+| WHERE transaction.duration.us IS NOT NULL
+| STATS
+    p50_ms = PERCENTILE(transaction.duration.us, 50) / 1000,
+    p99_ms = PERCENTILE(transaction.duration.us, 99) / 1000,
+    max_ms = MAX(transaction.duration.us) / 1000
+  BY service.name
+| SORT p99_ms DESC
+```
+
+**Matching engine latency (should be < 500µs for SLA compliance):**
+```esql
+FROM paypal-otel-logs
+| WHERE service.name == "matching-engine" AND transaction.duration.us IS NOT NULL
+| STATS
+    avg_us = AVG(transaction.duration.us),
+    p99_us = PERCENTILE(transaction.duration.us, 99),
+    count = COUNT(*)
+```
+
+**Settlement processor — batch latency (higher is expected, watch for outliers):**
+```esql
+FROM paypal-otel-logs
+| WHERE service.name == "settlement-processor"
+| STATS max_latency_ms = MAX(transaction.duration.us) / 1000, count = COUNT(*) BY service.name
+```
+
+---
+
+## Step 3 — Error Analysis
+
+**Error rate by service — identify the most impacted services:**
+```esql
+FROM paypal-otel-logs
+| STATS
+    total = COUNT(*),
+    errors = COUNT(*) WHERE severity_text == "ERROR"
+  BY service.name
+| EVAL error_pct = ROUND(errors * 100.0 / total, 2)
+| SORT error_pct DESC
+```
+
+**Find specific financial system errors:**
 ```esql
 FROM paypal-otel-logs
 | WHERE severity_text == "ERROR"
-| STATS error_count = COUNT(*) BY service.name
-| SORT error_count DESC
+| STATS count = COUNT(*) BY body.text
+| SORT count DESC
+| LIMIT 15
 ```
 
-This is the equivalent of a CAL query but with zero specialist syntax — and it covers all 7 services simultaneously.
-
----
-
-## Step 2 — Drill Into a Specific Service
-
-Pick the service with the highest error count from Step 1 and drill into its recent errors:
-
+**Risk and compliance errors — regulatory impact:**
 ```esql
 FROM paypal-otel-logs
 | WHERE severity_text == "ERROR"
-| STATS errors = COUNT(*), last_seen = MAX(@timestamp) BY service.name
-| SORT errors DESC
-| LIMIT 10
-```
-
-Now drill into the top service to see individual log messages (replace the service name with one from the results above):
-
-```esql
-FROM paypal-otel-logs
-| WHERE service.name == "payments-orchestrator" AND severity_text == "ERROR"
-| KEEP @timestamp, service.name, severity_text, body.text, trace.id
+  AND (service.name == "risk-calculator" OR service.name == "compliance-monitor" OR service.name == "fraud-detector")
+| KEEP @timestamp, service.name, body.text
 | SORT @timestamp DESC
 | LIMIT 20
 ```
 
-Copy any `trace.id` from the results — you'll use it in Step 3.
-
 ---
 
-## Step 3 — Trace a Transaction by Merchant
+## Step 4 — Multi-Cloud Health
 
-Take any `trace.id` from the results above and find all log entries across all services for that trace — this is distributed tracing without a separate trace tool:
-
+**Health by cloud provider:**
 ```esql
 FROM paypal-otel-logs
-| WHERE trace.id == "<paste-trace-id-here>"
-| KEEP @timestamp, service.name, severity_text, body.text, transaction.name
-| SORT @timestamp ASC
+| STATS
+    total = COUNT(*),
+    errors = COUNT(*) WHERE severity_text == "ERROR"
+  BY cloud.provider, cloud.region
+| EVAL error_rate = ROUND(errors * 100.0 / total, 2)
+| SORT error_rate DESC
 ```
 
-Replace `<paste-trace-id-here>` with an actual `trace.id` from Step 2. You'll see every service hop that touched that transaction — the equivalent of a distributed trace reconstructed purely from logs.
-
----
-
-## Step 4 — Query Latency Across Services
-
-ES|QL can compute P99 latency directly from the telemetry:
-
+**Instrument trading activity (order instrument distribution):**
 ```esql
 FROM paypal-otel-logs
-| WHERE @timestamp > NOW() - 30 MINUTES
-| EVAL duration_ms = transaction.duration.us / 1000
-| STATS p99_ms = MAX(duration_ms), avg_ms = AVG(duration_ms), requests = COUNT(*) BY service.name
-| SORT p99_ms DESC
-```
-
-```esql
-FROM paypal-otel-logs
-| WHERE @timestamp > NOW() - 30 MINUTES AND http.response.status_code >= 500
-| STATS error_5xx = COUNT(*) BY service.name, http.response.status_code
-| SORT error_5xx DESC
+| WHERE instrument IS NOT NULL
+| STATS trades = COUNT(*) BY instrument
+| SORT trades DESC
+| LIMIT 10
 ```
 
 ---
 
-## Step 5 — Ask the AI Agent
+## Step 5 — AI Agent Questions
 
-Click the **AI Assistant** button in Kibana and copy/paste these questions — each one demonstrates a real-world PayPal SRE investigation workflow:
+Open the Elastic AI Assistant and ask:
 
-```
-Which service has the highest error rate right now and what are the most common error messages?
-```
+> "Using paypal-otel-logs, show me a complete health summary of all 9 trading services: error rate, P99 latency, and total event count for the last 30 minutes."
 
-```
-Show me the P99 latency trend for the checkout-service over the last hour. Is it within SLO?
-```
+> "Which instruments and order types are generating the most errors in paypal-otel-logs?"
 
-```
-I'm investigating a checkout failure. Walk me through how to trace a failed transaction from the checkout-service through to the payments-orchestrator.
-```
+> "Compare the latency profile of matching-engine vs. settlement-processor. Which has more variance and why would that be expected?"
 
-```
-Compare error rates across all 7 services and tell me which ones look anomalous.
-```
+---
 
-```
-What would a CAL query for 'all ERROR events from the payments-orchestrator in the last 15 minutes' look like as an ES|QL query?
-```
+## ✅ Completion Check
 
-Notice how the AI Agent answers using your actual live data — not generic documentation responses.
+You'll pass this challenge when:
+- The generator is running
+- At least 50 documents exist in `paypal-otel-logs`
+- All 9 financial services are present
+- Error telemetry exists in the index

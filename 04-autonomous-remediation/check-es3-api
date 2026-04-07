@@ -41,8 +41,7 @@ except: print('')
 
 if [[ -n "$ACTIVE_CHANNELS" ]]; then
   fail "Fault channel(s) still active: $ACTIVE_CHANNELS.
-The Elastic workflow should auto-resolve within 2-3 minutes of the alert firing.
-To manually resolve: open Demo App → Chaos Controller → RESOLVE all active channels."
+To resolve: open Demo App → Chaos Controller → RESOLVE all active channels."
 fi
 
 pass "No active fault channels — incident resolved ✓"
@@ -68,17 +67,17 @@ if [[ -n "$ES_URL" && -n "$API_KEY" ]]; then
   DOC_COUNT=$(curl -sf "${ES_URL}/paypal-otel-logs/_count" \
     -H "Authorization: ApiKey ${API_KEY}" 2>/dev/null \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('count',0))" 2>/dev/null || echo "0")
-  pass "Total telemetry in Elastic: $DOC_COUNT documents across all 7 PayPal services ✓"
+  pass "Total telemetry in Elastic: $DOC_COUNT documents across all 9 financial platform services ✓"
 fi
 
 echo ""
-echo "🎉 Congratulations! You've completed the PayPal Merchant Observability lab."
+echo "🎉 Congratulations! You've completed the PayPal Payments Platform Observability lab."
 echo ""
 echo "   ✓ Connected live OpenTelemetry telemetry to Elastic Serverless"
-echo "   ✓ Queried logs, latency, and error rates across 7 PayPal microservices"
-echo "   ✓ Injected a realistic payment fault and watched real-time detection"
+echo "   ✓ Queried logs, latency, and error rates across 9 financial platform services"
+echo "   ✓ Injected a realistic trading fault and watched real-time detection"
 echo "   ✓ Witnessed autonomous AI investigation and workflow-driven remediation"
-echo "   ✓ Explored ML anomaly detection across merchant transaction patterns"
+echo "   ✓ Explored ML anomaly detection across trading operation patterns"
 echo ""
 echo "   The complete loop — instrument → detect → investigate → remediate — ran without human intervention."
 exit 0
