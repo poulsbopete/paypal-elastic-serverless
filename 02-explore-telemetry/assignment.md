@@ -13,33 +13,41 @@ notes:
     You now have live data from 9 trading services. In this challenge you'll use ES|QL to explore the full observability picture — order flow, latency distribution, error patterns, and subsystem health.
 
     This is what replacing CAL looks like: **one query language across all signals**.
-
-    ### O11Y Survivors — play while you wait
-
-    <iframe src="https://poulsbopete.github.io/Vampire-Clone/" width="100%" height="440" style="border:0;border-radius:8px;background:#0f172a" allow="fullscreen; autoplay" title="O11Y Survivors" loading="lazy"></iframe>
-
-    [Open in new tab](https://poulsbopete.github.io/Vampire-Clone/)
 tabs:
-- id: o11ywaitch02
-  title: O11Y Survivors
-  type: service
-  hostname: es3-api
-  port: 8080
-  path: /loading
-  new_window: true
-- id: chqbb7rksvs2
+- id: ppch2demo8090
   title: Demo App
   type: service
   hostname: es3-api
-  port: 8080
-  new_window: true
-- id: g3a3ue0le0nj
+  path: /
+  port: 8090
+- id: ppch2dash8090
+  title: Live Dashboard
+  type: service
+  hostname: es3-api
+  path: /dashboard
+  port: 8090
+- id: ppch2chaos809
+  title: Chaos Controller
+  type: service
+  hostname: es3-api
+  path: /chaos
+  port: 8090
+- id: ppch2esrv8080
   title: Elastic Serverless
   type: service
   hostname: es3-api
   path: /app/dashboards#/list?_g=(filters:!(),refreshInterval:(pause:!f,value:30000),time:(from:now-30m,to:now))
   port: 8080
-  new_window: true
+  custom_request_headers:
+  - key: Content-Security-Policy
+    value: 'script-src ''self'' https://kibana.estccdn.com; worker-src blob: ''self'';
+      style-src ''unsafe-inline'' ''self'' https://kibana.estccdn.com; style-src-elem
+      ''unsafe-inline'' ''self'' https://kibana.estccdn.com'
+  custom_response_headers:
+  - key: Content-Security-Policy
+    value: 'script-src ''self'' https://kibana.estccdn.com; worker-src blob: ''self'';
+      style-src ''unsafe-inline'' ''self'' https://kibana.estccdn.com; style-src-elem
+      ''unsafe-inline'' ''self'' https://kibana.estccdn.com'
 - id: imavv3tksqks
   title: Terminal
   type: terminal

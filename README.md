@@ -70,7 +70,7 @@ OTLP data lands in these Elastic data streams:
 
 ```
 paypal-elastic-serverless/
-├── track.yml                          # Track metadata (slug, title, enhanced_loading: true)
+├── track.yml                          # Track metadata (slug, title, enhanced_loading: false — same as elastic-autonomous-observability)
 ├── config.yml                         # VM definition + secrets block (ESS_CLOUD_API_KEY, LLM_PROXY_PROD)
 ├── README.md                          # This file
 ├── docs/
@@ -216,13 +216,15 @@ Run these in the **Terminal** tab on the Instruqt VM:
 
 ## Key Design Decisions
 
-### `enhanced_loading: true` (full-access loading)
+### O11Y Survivors + wait slides (same pattern as `elastic-autonomous-observability`)
 
-**Why:** With `enhanced_loading: false` (*notes only*), learners only see challenge **notes** while the sandbox provisions — they cannot open VM tabs, so the NGINX **`/loading`** page (value props + O11Y iframe) never appears during that wait.
+The upstream track [elastic-autonomous-observability](https://play.instruqt.com/manage/elastic/tracks/elastic-autonomous-observability) uses:
 
-With **`enhanced_loading: true`**, learners can open tabs while the lab loads. The first tab **O11Y Survivors** points at **`/loading`** (same content as the VM splash). The game is also embedded in **notes** via an `<iframe>` so it appears on the default notes wait screen.
+- **`enhanced_loading: false`** — notes-only while the sandbox provisions.
+- A **separate notes slide** (second `notes` entry) titled **“While You Wait — Play O11y Survivors!”** with an `<iframe>` to [Vampire-Clone](https://poulsbopete.github.io/Vampire-Clone/) at **height 800** (no extra O11Y tab).
+- **Demo App tabs on port `8090`**: `Demo App` → `/`, **Live Dashboard** → `/dashboard`, **Chaos Controller** → `/chaos`; **Elastic Serverless** on **`8080`** via NGINX with the same **CSP** header overrides as the upstream track.
 
-If you ever see a rare “multiple starts” race again, try setting `enhanced_loading: false` and rely on the notes iframe only (tabs won’t be available until **Start**).
+The VM **`/loading`** page (NGINX) still includes value props + the game for anyone who opens that URL directly.
 
 ### Secrets via `config.yml`
 

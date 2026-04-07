@@ -18,33 +18,41 @@ notes:
     - Review SLO burn rates
     - Use the AI Assistant for deep RCA
     - Understand the autonomous workflow architecture
-
-    ### O11Y Survivors — play while you wait
-
-    <iframe src="https://poulsbopete.github.io/Vampire-Clone/" width="100%" height="440" style="border:0;border-radius:8px;background:#0f172a" allow="fullscreen; autoplay" title="O11Y Survivors" loading="lazy"></iframe>
-
-    [Open in new tab](https://poulsbopete.github.io/Vampire-Clone/)
 tabs:
-- id: o11ywaitch04
-  title: O11Y Survivors
-  type: service
-  hostname: es3-api
-  port: 8080
-  path: /loading
-  new_window: true
-- id: hexdvijo5nuq
+- id: ppch4demo8090
   title: Demo App
   type: service
   hostname: es3-api
-  port: 8080
-  new_window: true
-- id: yje0vt7xn64w
+  path: /
+  port: 8090
+- id: ppch4dash8090
+  title: Live Dashboard
+  type: service
+  hostname: es3-api
+  path: /dashboard
+  port: 8090
+- id: ppch4chaos809
+  title: Chaos Controller
+  type: service
+  hostname: es3-api
+  path: /chaos
+  port: 8090
+- id: ppch4esrv8080
   title: Elastic Serverless
   type: service
   hostname: es3-api
   path: /app/observability/alerts?_g=(filters:!(),refreshInterval:(pause:!f,value:30000),time:(from:now-30m,to:now))
   port: 8080
-  new_window: true
+  custom_request_headers:
+  - key: Content-Security-Policy
+    value: 'script-src ''self'' https://kibana.estccdn.com; worker-src blob: ''self'';
+      style-src ''unsafe-inline'' ''self'' https://kibana.estccdn.com; style-src-elem
+      ''unsafe-inline'' ''self'' https://kibana.estccdn.com'
+  custom_response_headers:
+  - key: Content-Security-Policy
+    value: 'script-src ''self'' https://kibana.estccdn.com; worker-src blob: ''self'';
+      style-src ''unsafe-inline'' ''self'' https://kibana.estccdn.com; style-src-elem
+      ''unsafe-inline'' ''self'' https://kibana.estccdn.com'
 - id: mnxdlxrrtho0
   title: Terminal
   type: terminal

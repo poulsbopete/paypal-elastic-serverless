@@ -32,35 +32,48 @@ notes:
     | compliance-monitor | Azure eastus | Compliance |
     | customer-portal | Azure eastus | Client Services |
     | audit-logger | Azure eastus | Audit |
+- type: text
+  contents: |
+    ## While You Wait — Play O11y Survivors! 🎮
 
-    ### O11Y Survivors — play while you wait
+    Setup takes a few minutes. Survive the anomaly storm while Elastic provisions your environment:
 
-    Embedded below (and on the **O11Y Survivors** tab → `/loading` on the VM). Click inside the game for keyboard focus.
-
-    <iframe src="https://poulsbopete.github.io/Vampire-Clone/" width="100%" height="440" style="border:0;border-radius:8px;background:#0f172a" allow="fullscreen; autoplay" title="O11Y Survivors" loading="lazy"></iframe>
-
-    [Open O11Y Survivors in a new tab](https://poulsbopete.github.io/Vampire-Clone/)
+    <iframe src="https://poulsbopete.github.io/Vampire-Clone/" width="100%" height="800" frameborder="0" allowfullscreen style="border-radius:8px;display:block;"></iframe>
 tabs:
-- id: o11ywaitch01
-  title: O11Y Survivors
-  type: service
-  hostname: es3-api
-  port: 8080
-  path: /loading
-  new_window: true
-- id: zwbfmiliyhor
+- id: ppch1demo8090
   title: Demo App
   type: service
   hostname: es3-api
-  port: 8080
-  new_window: true
-- id: lxben732h7fv
+  path: /
+  port: 8090
+- id: ppch1dash8090
+  title: Live Dashboard
+  type: service
+  hostname: es3-api
+  path: /dashboard
+  port: 8090
+- id: ppch1chaos809
+  title: Chaos Controller
+  type: service
+  hostname: es3-api
+  path: /chaos
+  port: 8090
+- id: ppch1esrv8080
   title: Elastic Serverless
   type: service
   hostname: es3-api
   path: /app/dashboards#/list?_g=(filters:!(),refreshInterval:(pause:!f,value:30000),time:(from:now-30m,to:now))
   port: 8080
-  new_window: true
+  custom_request_headers:
+  - key: Content-Security-Policy
+    value: 'script-src ''self'' https://kibana.estccdn.com; worker-src blob: ''self'';
+      style-src ''unsafe-inline'' ''self'' https://kibana.estccdn.com; style-src-elem
+      ''unsafe-inline'' ''self'' https://kibana.estccdn.com'
+  custom_response_headers:
+  - key: Content-Security-Policy
+    value: 'script-src ''self'' https://kibana.estccdn.com; worker-src blob: ''self'';
+      style-src ''unsafe-inline'' ''self'' https://kibana.estccdn.com; style-src-elem
+      ''unsafe-inline'' ''self'' https://kibana.estccdn.com'
 - id: szv5okbgr6iu
   title: Terminal
   type: terminal

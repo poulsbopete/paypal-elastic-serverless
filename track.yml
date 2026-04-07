@@ -20,6 +20,7 @@ developers:
 idle_timeout: 3600
 timelimit: 10800
 lab_config:
+  extend_ttl: 3600
   sidebar_enabled: true
   feedback_recap_enabled: true
   feedback_tab_enabled: false
@@ -28,5 +29,5 @@ lab_config:
     name: modern-dark
   override_challenge_layout: false
   hideStopButton: false
-checksum: "353224561500380079"
-enhanced_loading: true
+checksum: "3429536682248979359"
+enhanced_loading: false
