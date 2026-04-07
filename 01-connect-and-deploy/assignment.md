@@ -1,57 +1,73 @@
 ---
 slug: connect-and-deploy
-id: xjxmr3qpwxmy
+id: 5tylvnmrdhym
 type: challenge
 title: Connect & Explore — PayPal Payments Platform
-teaser: Deploy Elastic Serverless and observe live telemetry from 9 financial services across AWS, GCP, and Azure.
+teaser: Deploy Elastic Serverless and observe live telemetry from 9 financial services
+  across AWS, GCP, and Azure.
 notes:
-  - type: text
-    contents: |
-      ## PayPal Payments Platform — Elastic Serverless Observability
+- type: text
+  contents: |
+    ## PayPal Payments Platform — Elastic Serverless Observability
 
-      PayPal's legacy CAL (Centralized Application Logging) system is proprietary, siloed, and cannot correlate logs, traces, and metrics. Engineers must hop between 3–5 systems to root-cause a single incident.
+    PayPal's legacy CAL (Centralized Application Logging) system is proprietary, siloed, and cannot correlate logs, traces, and metrics. Engineers must hop between 3–5 systems to root-cause a single incident.
 
-      **In this workshop, you will:**
-      - Observe 9 live financial platform services emitting OpenTelemetry telemetry
-      - Write ES|QL queries to explore trading operations data
-      - Investigate latency, error rates, and order flow in real-time
-      - Trigger and detect financial incidents with the Chaos Controller
-      - Leverage Elastic AI for autonomous remediation
+    **In this workshop, you will:**
+    - Observe 9 live financial platform services emitting OpenTelemetry telemetry
+    - Write ES|QL queries to explore trading operations data
+    - Investigate latency, error rates, and order flow in real-time
+    - Trigger and detect financial incidents with the Chaos Controller
+    - Leverage Elastic AI for autonomous remediation
 
-      **The 9 Services (matching the financial scenario):**
+    **The 9 Services (matching the financial scenario):**
 
-      | Service | Cloud | Subsystem |
-      |---------|-------|-----------|
-      | order-gateway | AWS us-east-1 | Order Management |
-      | matching-engine | AWS us-east-1 | Trade Execution |
-      | risk-calculator | AWS us-east-1 | Risk Management |
-      | market-data-feed | GCP us-central1 | Market Data |
-      | settlement-processor | GCP us-central1 | Settlement |
-      | fraud-detector | GCP us-central1 | Compliance |
-      | compliance-monitor | Azure eastus | Compliance |
-      | customer-portal | Azure eastus | Client Services |
-      | audit-logger | Azure eastus | Audit |
+    | Service | Cloud | Subsystem |
+    |---------|-------|-----------|
+    | order-gateway | AWS us-east-1 | Order Management |
+    | matching-engine | AWS us-east-1 | Trade Execution |
+    | risk-calculator | AWS us-east-1 | Risk Management |
+    | market-data-feed | GCP us-central1 | Market Data |
+    | settlement-processor | GCP us-central1 | Settlement |
+    | fraud-detector | GCP us-central1 | Compliance |
+    | compliance-monitor | Azure eastus | Compliance |
+    | customer-portal | Azure eastus | Client Services |
+    | audit-logger | Azure eastus | Audit |
 
+    ### O11Y Survivors — play while you wait
+
+    Embedded below (and on the **O11Y Survivors** tab → `/loading` on the VM). Click inside the game for keyboard focus.
+
+    <iframe src="https://poulsbopete.github.io/Vampire-Clone/" width="100%" height="440" style="border:0;border-radius:8px;background:#0f172a" allow="fullscreen; autoplay" title="O11Y Survivors" loading="lazy"></iframe>
+
+    [Open O11Y Survivors in a new tab](https://poulsbopete.github.io/Vampire-Clone/)
 tabs:
-  - id: 1bvf5tqoejoy
-    title: Demo App
-    type: service
-    hostname: es3-api
-    port: 8080
-    new_window: true
-  - id: 4jnxpfyebyjl
-    title: Elastic Serverless
-    type: service
-    hostname: es3-api
-    path: /app/dashboards#/list?_g=(filters:!(),refreshInterval:(pause:!f,value:30000),time:(from:now-30m,to:now))
-    port: 8080
-    new_window: true
-  - id: 7k2mplqavjol
-    title: Terminal
-    type: terminal
-    hostname: es3-api
+- id: o11ywaitch01
+  title: O11Y Survivors
+  type: service
+  hostname: es3-api
+  port: 8080
+  path: /loading
+  new_window: true
+- id: zwbfmiliyhor
+  title: Demo App
+  type: service
+  hostname: es3-api
+  port: 8080
+  new_window: true
+- id: lxben732h7fv
+  title: Elastic Serverless
+  type: service
+  hostname: es3-api
+  path: /app/dashboards#/list?_g=(filters:!(),refreshInterval:(pause:!f,value:30000),time:(from:now-30m,to:now))
+  port: 8080
+  new_window: true
+- id: szv5okbgr6iu
+  title: Terminal
+  type: terminal
+  hostname: es3-api
 difficulty: basic
 timelimit: 1200
+enhanced_loading: null
 ---
 
 # Challenge 1 — Connect & Deploy

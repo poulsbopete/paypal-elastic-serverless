@@ -1,42 +1,57 @@
 ---
 slug: autonomous-remediation
-id: xyzabc123def
+id: 0h7rr7klrbwo
 type: challenge
 title: Autonomous Remediation — AI-Driven Incident Response
-teaser: Resolve the financial fault and explore how Elastic's AI and ML deliver autonomous remediation for PayPal-scale trading operations.
+teaser: Resolve the financial fault and explore how Elastic's AI and ML deliver autonomous
+  remediation for PayPal-scale trading operations.
 notes:
-  - type: text
-    contents: |
-      ## Autonomous Remediation
+- type: text
+  contents: |
+    ## Autonomous Remediation
 
-      You've observed a fault cascade across the trading pipeline. Now it's time to resolve it and explore how Elastic's built-in AI and ML capabilities can autonomously detect, diagnose, and remediate financial incidents.
+    You've observed a fault cascade across the trading pipeline. Now it's time to resolve it and explore how Elastic's built-in AI and ML capabilities can autonomously detect, diagnose, and remediate financial incidents.
 
-      **In this challenge:**
-      - Resolve the active fault channels
-      - Explore ML anomaly job results
-      - Review SLO burn rates
-      - Use the AI Assistant for deep RCA
-      - Understand the autonomous workflow architecture
+    **In this challenge:**
+    - Resolve the active fault channels
+    - Explore ML anomaly job results
+    - Review SLO burn rates
+    - Use the AI Assistant for deep RCA
+    - Understand the autonomous workflow architecture
+
+    ### O11Y Survivors — play while you wait
+
+    <iframe src="https://poulsbopete.github.io/Vampire-Clone/" width="100%" height="440" style="border:0;border-radius:8px;background:#0f172a" allow="fullscreen; autoplay" title="O11Y Survivors" loading="lazy"></iframe>
+
+    [Open in new tab](https://poulsbopete.github.io/Vampire-Clone/)
 tabs:
-  - id: 1bvf5tqoejoy
-    title: Demo App
-    type: service
-    hostname: es3-api
-    port: 8080
-    new_window: true
-  - id: 4jnxpfyebyjl
-    title: Elastic Serverless
-    type: service
-    hostname: es3-api
-    path: /app/observability/alerts?_g=(filters:!(),refreshInterval:(pause:!f,value:30000),time:(from:now-30m,to:now))
-    port: 8080
-    new_window: true
-  - id: 7k2mplqavjol
-    title: Terminal
-    type: terminal
-    hostname: es3-api
+- id: o11ywaitch04
+  title: O11Y Survivors
+  type: service
+  hostname: es3-api
+  port: 8080
+  path: /loading
+  new_window: true
+- id: hexdvijo5nuq
+  title: Demo App
+  type: service
+  hostname: es3-api
+  port: 8080
+  new_window: true
+- id: yje0vt7xn64w
+  title: Elastic Serverless
+  type: service
+  hostname: es3-api
+  path: /app/observability/alerts?_g=(filters:!(),refreshInterval:(pause:!f,value:30000),time:(from:now-30m,to:now))
+  port: 8080
+  new_window: true
+- id: mnxdlxrrtho0
+  title: Terminal
+  type: terminal
+  hostname: es3-api
 difficulty: basic
 timelimit: 1200
+enhanced_loading: null
 ---
 
 # Challenge 4 — Autonomous Remediation

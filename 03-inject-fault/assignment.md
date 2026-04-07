@@ -1,37 +1,52 @@
 ---
 slug: inject-fault
-id: sfchswjcquyy
+id: 5wgfot0esuqz
 type: challenge
 title: Inject Fault — Financial Incident Detection
-teaser: Use the Chaos Controller to inject a trading platform fault and watch Elastic detect it automatically.
+teaser: Use the Chaos Controller to inject a trading platform fault and watch Elastic
+  detect it automatically.
 notes:
-  - type: text
-    contents: |
-      ## Financial Incident Simulation
+- type: text
+  contents: |
+    ## Financial Incident Simulation
 
-      The PayPal trading platform handles billions of dollars in daily order flow. A single fault in the matching engine or order gateway can cascade into settlement failures and regulatory reporting gaps.
+    The PayPal trading platform handles billions of dollars in daily order flow. A single fault in the matching engine or order gateway can cascade into settlement failures and regulatory reporting gaps.
 
-      In this challenge, you'll use the **Chaos Controller** to inject a financial incident and observe how Elastic Serverless detects it in real-time.
+    In this challenge, you'll use the **Chaos Controller** to inject a financial incident and observe how Elastic Serverless detects it in real-time.
+
+    ### O11Y Survivors — play while you wait
+
+    <iframe src="https://poulsbopete.github.io/Vampire-Clone/" width="100%" height="440" style="border:0;border-radius:8px;background:#0f172a" allow="fullscreen; autoplay" title="O11Y Survivors" loading="lazy"></iframe>
+
+    [Open in new tab](https://poulsbopete.github.io/Vampire-Clone/)
 tabs:
-  - id: 1bvf5tqoejoy
-    title: Demo App
-    type: service
-    hostname: es3-api
-    port: 8080
-    new_window: true
-  - id: 4jnxpfyebyjl
-    title: Elastic Serverless
-    type: service
-    hostname: es3-api
-    path: /app/observability/alerts?_g=(filters:!(),refreshInterval:(pause:!f,value:30000),time:(from:now-30m,to:now))
-    port: 8080
-    new_window: true
-  - id: 7k2mplqavjol
-    title: Terminal
-    type: terminal
-    hostname: es3-api
+- id: o11ywaitch03
+  title: O11Y Survivors
+  type: service
+  hostname: es3-api
+  port: 8080
+  path: /loading
+  new_window: true
+- id: ywvlnwwrjn9q
+  title: Demo App
+  type: service
+  hostname: es3-api
+  port: 8080
+  new_window: true
+- id: lzlq9yaywlmx
+  title: Elastic Serverless
+  type: service
+  hostname: es3-api
+  path: /app/observability/alerts?_g=(filters:!(),refreshInterval:(pause:!f,value:30000),time:(from:now-30m,to:now))
+  port: 8080
+  new_window: true
+- id: mns4y27ssjnf
+  title: Terminal
+  type: terminal
+  hostname: es3-api
 difficulty: basic
 timelimit: 1200
+enhanced_loading: null
 ---
 
 # Challenge 3 — Inject a Financial Fault

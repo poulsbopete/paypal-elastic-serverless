@@ -70,7 +70,7 @@ OTLP data lands in these Elastic data streams:
 
 ```
 paypal-elastic-serverless/
-├── track.yml                          # Track metadata (slug, title, enhanced_loading: false)
+├── track.yml                          # Track metadata (slug, title, enhanced_loading: true)
 ├── config.yml                         # VM definition + secrets block (ESS_CLOUD_API_KEY, LLM_PROXY_PROD)
 ├── README.md                          # This file
 ├── docs/
@@ -216,9 +216,13 @@ Run these in the **Terminal** tab on the Instruqt VM:
 
 ## Key Design Decisions
 
-### `enhanced_loading: false`
+### `enhanced_loading: true` (full-access loading)
 
-Setting `enhanced_loading: false` prevents a "multiple starts" race condition observed in testing. The `/loading` path on NGINX serves the PayPal value props splash page while the VM provisions.
+**Why:** With `enhanced_loading: false` (*notes only*), learners only see challenge **notes** while the sandbox provisions — they cannot open VM tabs, so the NGINX **`/loading`** page (value props + O11Y iframe) never appears during that wait.
+
+With **`enhanced_loading: true`**, learners can open tabs while the lab loads. The first tab **O11Y Survivors** points at **`/loading`** (same content as the VM splash). The game is also embedded in **notes** via an `<iframe>` so it appears on the default notes wait screen.
+
+If you ever see a rare “multiple starts” race again, try setting `enhanced_loading: false` and rely on the notes iframe only (tabs won’t be available until **Start**).
 
 ### Secrets via `config.yml`
 

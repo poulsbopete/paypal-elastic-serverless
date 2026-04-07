@@ -1,37 +1,52 @@
 ---
 slug: explore-telemetry
-id: eqaxxn8koq3y
+id: ylcnef3giyz0
 type: challenge
 title: Explore Telemetry — Trading Platform Observability
-teaser: Investigate order flow, latency, and risk events across 9 financial services using ES|QL.
+teaser: Investigate order flow, latency, and risk events across 9 financial services
+  using ES|QL.
 notes:
-  - type: text
-    contents: |
-      ## Explore Financial Platform Telemetry
+- type: text
+  contents: |
+    ## Explore Financial Platform Telemetry
 
-      You now have live data from 9 trading services. In this challenge you'll use ES|QL to explore the full observability picture — order flow, latency distribution, error patterns, and subsystem health.
+    You now have live data from 9 trading services. In this challenge you'll use ES|QL to explore the full observability picture — order flow, latency distribution, error patterns, and subsystem health.
 
-      This is what replacing CAL looks like: **one query language across all signals**.
+    This is what replacing CAL looks like: **one query language across all signals**.
+
+    ### O11Y Survivors — play while you wait
+
+    <iframe src="https://poulsbopete.github.io/Vampire-Clone/" width="100%" height="440" style="border:0;border-radius:8px;background:#0f172a" allow="fullscreen; autoplay" title="O11Y Survivors" loading="lazy"></iframe>
+
+    [Open in new tab](https://poulsbopete.github.io/Vampire-Clone/)
 tabs:
-  - id: 1bvf5tqoejoy
-    title: Demo App
-    type: service
-    hostname: es3-api
-    port: 8080
-    new_window: true
-  - id: 4jnxpfyebyjl
-    title: Elastic Serverless
-    type: service
-    hostname: es3-api
-    path: /app/dashboards#/list?_g=(filters:!(),refreshInterval:(pause:!f,value:30000),time:(from:now-30m,to:now))
-    port: 8080
-    new_window: true
-  - id: 7k2mplqavjol
-    title: Terminal
-    type: terminal
-    hostname: es3-api
+- id: o11ywaitch02
+  title: O11Y Survivors
+  type: service
+  hostname: es3-api
+  port: 8080
+  path: /loading
+  new_window: true
+- id: chqbb7rksvs2
+  title: Demo App
+  type: service
+  hostname: es3-api
+  port: 8080
+  new_window: true
+- id: g3a3ue0le0nj
+  title: Elastic Serverless
+  type: service
+  hostname: es3-api
+  path: /app/dashboards#/list?_g=(filters:!(),refreshInterval:(pause:!f,value:30000),time:(from:now-30m,to:now))
+  port: 8080
+  new_window: true
+- id: imavv3tksqks
+  title: Terminal
+  type: terminal
+  hostname: es3-api
 difficulty: basic
 timelimit: 1200
+enhanced_loading: null
 ---
 
 # Challenge 2 — Explore Financial Platform Telemetry
