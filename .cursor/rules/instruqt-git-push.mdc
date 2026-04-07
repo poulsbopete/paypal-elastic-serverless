@@ -1,0 +1,18 @@
+---
+description: After git push, always push the Instruqt track from this repo root
+alwaysApply: true
+---
+
+# Instruqt + Git
+
+This repository is the **Instruqt track** source (`paypal-elastic-serverless`).
+
+Whenever you **commit and push to Git** (`git push`) for this project, also run **`instruqt track push`** from **this directory** (the repo root that contains `track.yml`), unless the user explicitly says not to.
+
+```bash
+cd "$(git rev-parse --show-toplevel)" && instruqt track push
+```
+
+If `instruqt track push` fails (auth, network), report the error and what the user should run locally.
+
+Track manager URL: https://play.instruqt.com/manage/elastic/tracks/paypal-elastic-serverless
