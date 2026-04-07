@@ -33,32 +33,30 @@ notes:
     | customer-portal | Azure eastus | Client Services |
     | audit-logger | Azure eastus | Audit |
 - type: text
-  contents: |
-    ## While You Wait — Play O11y Survivors! 🎮
-
-    Setup takes a few minutes. Survive the anomaly storm while Elastic provisions your environment:
-
-    <iframe src="https://poulsbopete.github.io/Vampire-Clone/" width="100%" height="800" frameborder="0" allowfullscreen style="border-radius:8px;display:block;"></iframe>
+  contents: "## While You Wait — Play O11y Survivors! \U0001F3AE\n\nSetup takes a
+    few minutes. Survive the anomaly storm while Elastic provisions your environment:\n\n<iframe
+    src=\"https://poulsbopete.github.io/Vampire-Clone/\" width=\"100%\" height=\"800\"
+    frameborder=\"0\" allowfullscreen style=\"border-radius:8px;display:block;\"></iframe>\n"
 tabs:
-- id: ppch1demo8090
+- id: ivy5xxd2wd28
   title: Demo App
   type: service
   hostname: es3-api
   path: /
   port: 8090
-- id: ppch1dash8090
+- id: igyf1ebxdn41
   title: Live Dashboard
   type: service
   hostname: es3-api
   path: /dashboard
   port: 8090
-- id: ppch1chaos809
+- id: d3yp8cepyihk
   title: Chaos Controller
   type: service
   hostname: es3-api
   path: /chaos
   port: 8090
-- id: ppch1esrv8080
+- id: t2xzynorumrr
   title: Elastic Serverless
   type: service
   hostname: es3-api
@@ -95,7 +93,7 @@ The Demo App tab shows the **PayPal Operations Center** (financial scenario), wi
 
 ## Step 1 — Open the Demo App
 
-Click the **Demo App** tab. You should see:
+Click the **Demo App** tab (or **Live Dashboard** / **Chaos Controller** — same app on port 8090). You should see:
 - **PayPal Operations Center** — Bloomberg terminal-style dashboard
 - **9 services** across AWS, GCP, and Azure in green (healthy) state
 - **Chaos Controller** — 20 financial fault channels ready to inject
