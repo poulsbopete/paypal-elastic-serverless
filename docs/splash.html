@@ -96,6 +96,15 @@
             display: inline-flex; align-items: center; gap: 8px;
         }
         .footer a:hover { opacity: 0.9; }
+        .game-wrap {
+            margin-top: 14px; border-radius: 10px; overflow: hidden;
+            border: 1px solid #1f2d44; background: #0d1117;
+        }
+        .game-wrap iframe {
+            width: 100%; height: min(520px, 65vh); border: 0; display: block;
+        }
+        .game-hint { font-size: 11px; color: #64748b; margin-top: 10px; }
+        .game-hint a { color: #38bdf8; }
     </style>
 </head>
 <body>
@@ -272,6 +281,20 @@
             <span class="badge badge-blue">OpenTelemetry Native</span>
             <span class="badge badge-blue">Zero-Ops Serverless</span>
         </div>
+    </div>
+
+    <div class="section-label">06 &mdash; While You Wait</div>
+    <div class="card">
+        <h2>O11Y Survivors</h2>
+        <p>Play while your Elastic Serverless environment provisions. Click inside the game to capture keyboard focus.</p>
+        <div class="game-wrap">
+            <iframe title="O11Y Survivors"
+                src="https://poulsbopete.github.io/Vampire-Clone/"
+                allow="fullscreen; autoplay"
+                loading="lazy"
+                referrerpolicy="strict-origin-when-cross-origin"></iframe>
+        </div>
+        <p class="game-hint">Hosted at <a href="https://poulsbopete.github.io/Vampire-Clone/" target="_blank" rel="noopener noreferrer">poulsbopete.github.io/Vampire-Clone</a></p>
     </div>
 
     <div class="footer">

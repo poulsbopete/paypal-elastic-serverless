@@ -37,7 +37,7 @@ This lab puts participants in the role of a PayPal SRE evaluating Elastic Server
 │  ┌────────▼────────┐                              │               │
 │  │  NGINX           │──────── Kibana proxy ───────┘               │
 │  │  port 8080       │  (ApiKey auth, no login)                    │
-│  │  /loading        │  ← PayPal value props splash page           │
+│  │  /loading        │  ← PayPal value props + O11Y Survivors iframe │
 │  │  /home           │  ← Demo App landing page                    │
 │  └─────────────────┘                                              │
 └──────────────────────────────────────────────────────────────────┘
