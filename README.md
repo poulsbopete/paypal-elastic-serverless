@@ -222,7 +222,7 @@ The upstream track [elastic-autonomous-observability](https://play.instruqt.com/
 
 - **`enhanced_loading: false`** — notes-only while the sandbox provisions.
 - A **separate notes slide** (second `notes` entry) titled **“While You Wait — Play O11y Survivors!”** with an `<iframe>` to [Vampire-Clone](https://poulsbopete.github.io/Vampire-Clone/) at **height 800** (no extra O11Y tab).
-- **Demo App tabs on port `8090`**: `Demo App` → `/`, **Live Dashboard** → `/dashboard`, **Chaos Controller** → `/chaos`; **Elastic Serverless** on **`8080`** via NGINX with the same **CSP** header overrides as the upstream track.
+- **Demo App tabs on port `8090`**: `Demo App` → `/`, **Chaos Controller** → `/chaos`; **Elastic Serverless** on **`8080`** via NGINX with the same **CSP** header overrides as the upstream track.
 
 The VM **`/loading`** page (NGINX) still includes value props + the game for anyone who opens that URL directly.
 

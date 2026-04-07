@@ -14,25 +14,19 @@ notes:
 
     This is what replacing CAL looks like: **one query language across all signals**.
 tabs:
-- id: ppch2demo8090
+- id: mkivx88pvqg4
   title: Demo App
   type: service
   hostname: es3-api
   path: /
   port: 8090
-- id: ppch2dash8090
-  title: Live Dashboard
-  type: service
-  hostname: es3-api
-  path: /dashboard
-  port: 8090
-- id: ppch2chaos809
+- id: yioapkasfcj7
   title: Chaos Controller
   type: service
   hostname: es3-api
   path: /chaos
   port: 8090
-- id: ppch2esrv8080
+- id: mz3qbyyy9bpl
   title: Elastic Serverless
   type: service
   hostname: es3-api

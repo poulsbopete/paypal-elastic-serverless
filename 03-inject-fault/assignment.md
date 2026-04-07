@@ -14,25 +14,19 @@ notes:
 
     In this challenge, you'll use the **Chaos Controller** to inject a financial incident and observe how Elastic Serverless detects it in real-time.
 tabs:
-- id: ppch3demo8090
+- id: lrubz3y8tquk
   title: Demo App
   type: service
   hostname: es3-api
   path: /
   port: 8090
-- id: ppch3dash8090
-  title: Live Dashboard
-  type: service
-  hostname: es3-api
-  path: /dashboard
-  port: 8090
-- id: ppch3chaos809
+- id: almy7jlst2rp
   title: Chaos Controller
   type: service
   hostname: es3-api
   path: /chaos
   port: 8090
-- id: ppch3esrv8080
+- id: ytffh7ojjgec
   title: Elastic Serverless
   type: service
   hostname: es3-api

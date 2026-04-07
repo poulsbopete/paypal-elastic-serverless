@@ -44,12 +44,6 @@ tabs:
   hostname: es3-api
   path: /
   port: 8090
-- id: igyf1ebxdn41
-  title: Live Dashboard
-  type: service
-  hostname: es3-api
-  path: /dashboard
-  port: 8090
 - id: d3yp8cepyihk
   title: Chaos Controller
   type: service
@@ -93,7 +87,7 @@ The Demo App tab shows the **PayPal Operations Center** (financial scenario), wi
 
 ## Step 1 — Open the Demo App
 
-Click the **Demo App** tab (or **Live Dashboard** / **Chaos Controller** — same app on port 8090). You should see:
+Click the **Demo App** tab (or **Chaos Controller** — same app on port 8090). You should see:
 - **PayPal Operations Center** — Bloomberg terminal-style dashboard
 - **9 services** across AWS, GCP, and Azure in green (healthy) state
 - **Chaos Controller** — 20 financial fault channels ready to inject

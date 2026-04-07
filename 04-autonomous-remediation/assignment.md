@@ -19,25 +19,19 @@ notes:
     - Use the AI Assistant for deep RCA
     - Understand the autonomous workflow architecture
 tabs:
-- id: ppch4demo8090
+- id: jz1edp5lfpmx
   title: Demo App
   type: service
   hostname: es3-api
   path: /
   port: 8090
-- id: ppch4dash8090
-  title: Live Dashboard
-  type: service
-  hostname: es3-api
-  path: /dashboard
-  port: 8090
-- id: ppch4chaos809
+- id: t4y8e30eexkg
   title: Chaos Controller
   type: service
   hostname: es3-api
   path: /chaos
   port: 8090
-- id: ppch4esrv8080
+- id: 3o66hyfwxfwl
   title: Elastic Serverless
   type: service
   hostname: es3-api
