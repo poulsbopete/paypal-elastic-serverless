@@ -111,8 +111,8 @@ paypal-elastic-serverless/
 3. **Installs NGINX** on port **8080** as a Kibana reverse proxy (Basic auth to the project)
 4. **Serves** `/loading` and `/chatbot` static pages
 5. **Starts** the JSON credentials server on port **8081**
-6. **Clones** `elastic-launch-demo` (branch `feat/back-navigation-noc-chaos`), installs deps, starts **systemd** `elastic-demo` on port **8090**
-7. **POSTs `/api/setup/launch`** with `scenario_id: fanatics` so the **Fanatics Live** scenario deploys into the project (alerts, workflows, dashboards, ML, etc. come from that deployment — not from extra bash in this repo)
+6. **Clones** `elastic-launch-demo` (branch `feat/back-navigation-noc-chaos`), **patches** `scenarios/__init__.py` to remove **Claro** from the scenario list, installs deps, and starts **systemd** `elastic-demo` on port **8090** with **`ACTIVE_SCENARIO=banking`**
+7. **POSTs `/api/setup/launch`** with `scenario_id: banking` so the **Retail Banking Platform** deploys into the project (alerts, workflows, dashboards, ML, etc. come from that deployment — not from extra bash in this repo)
 
 Shell aliases: `demo-logs`, `demo-status`, `demo-deployments`, `demo-chaos`, `demo-restart` (see **Diagnostic Commands**).
 
@@ -172,7 +172,7 @@ Run these in the **Terminal** tab on the Instruqt VM:
 
 ### Empty Discover or “no active deployment”
 
-- **Discover empty:** widen the time range (e.g. **Last 15 minutes**) and confirm the **Fanatics** scenario finished deploying (Demo App progress bar).
+- **Discover empty:** widen the time range (e.g. **Last 15 minutes**) and confirm the **Retail Banking** scenario finished deploying (Demo App progress bar).
 - **Chaos Controller:** “NO ACTIVE DEPLOYMENT” means the demo scenario is not running — open **Demo App**, confirm Kibana URL/API key if prompted, and click **Launch** (or wait for auto-launch to finish after track start).
 
 | Symptom | What to try |
@@ -224,7 +224,7 @@ The Elastic Serverless OTLP ingest endpoint always listens on port 443, regardle
 
 ### Provisioning baseline
 
-`track_scripts/setup-es3-api` matches **elastic-autonomous-observability**: it does **not** apply PayPal-specific runtime patches to the demo. The VM runs the **Fanatics** scenario from `elastic-launch-demo` (branch `feat/back-navigation-noc-chaos`). Re-add PayPal theming via patches or a fork once the flow is validated.
+`track_scripts/setup-es3-api` starts from the **elastic-autonomous-observability**-style flow, then **defaults to Retail Banking** (`banking`) and **removes Claro** from the demo’s scenario registry via a small patch to `elastic-launch-demo` (branch `feat/back-navigation-noc-chaos`).
 
 ---
 

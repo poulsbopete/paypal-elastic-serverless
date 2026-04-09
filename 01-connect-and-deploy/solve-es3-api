@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Challenge 1 solve: programmatically launch the fanatics scenario.
+# Challenge 1 solve: programmatically launch the retail banking scenario.
 # Requires Instruqt track variables:
 #   ELASTIC_KIBANA_URL  — e.g. https://my-project.kb.us-east-1.aws.elastic.cloud
 #   ELASTIC_API_KEY     — just the key value (without "ApiKey " prefix)
@@ -32,10 +32,10 @@ if [[ "$CONN_OK" != "true" ]]; then
 fi
 log "Connection OK ✓"
 
-log "Launching fanatics scenario..."
+log "Launching retail banking scenario..."
 LAUNCH_RESULT="$(curl -sf -X POST "${APP}/api/setup/launch" \
   -H 'Content-Type: application/json' \
-  -d "{\"scenario_id\":\"fanatics\",\"kibana_url\":\"${KIBANA_URL}\",\"api_key\":\"${API_KEY}\"}" 2>/dev/null || echo '{}')"
+  -d "{\"scenario_id\":\"banking\",\"kibana_url\":\"${KIBANA_URL}\",\"api_key\":\"${API_KEY}\"}" 2>/dev/null || echo '{}')"
 
 log "Launch initiated. Waiting for deployment to register..."
 
@@ -59,4 +59,4 @@ print(sum(1 for d in deps if d.get('running')))
   sleep 2
 done
 
-log "Solve complete — fanatics scenario deployed and running."
+log "Solve complete — retail banking scenario deployed and running."

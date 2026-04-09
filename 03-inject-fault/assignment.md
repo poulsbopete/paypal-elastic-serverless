@@ -60,7 +60,7 @@ Now it's time to break something. The incident simulator lets you inject realist
 ## Trigger a Fault
 
 1. Open the **Demo App** tab
-2. Find your running **Fanatics Collectibles** deployment and click the **Chaos** link next to it
+2. Find your running **Retail Banking Platform** deployment and click the **Chaos** link next to it
 3. You'll see 20 fault channels organized by subsystem and cloud provider
 4. Select a channel from the dropdown and click **Inject Fault**
 
@@ -114,7 +114,7 @@ You should see the triggered channel with `"state": "ACTIVE"`.
 
 ---
 
-## Fault Channel Reference (Fanatics Scenario)
+## Fault Channel Reference (Retail Banking scenario)
 
 | Ch | Name | Subsystem | Cloud |
 |----|------|-----------|-------|

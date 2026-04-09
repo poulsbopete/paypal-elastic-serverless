@@ -726,6 +726,31 @@ else
   git clone --branch "$DEMO_BRANCH" "$DEMO_REPO" "$DEMO_DIR"
 fi
 
+# PayPal track: auto-launch Retail Banking (`banking`); hide Claro from the scenario picker.
+echo "Patching scenario registry (remove Claro)..."
+python3 <<'SCENARIO_PATCH_EOF'
+from pathlib import Path
+import re
+p = Path("/opt/elastic-launch-demo/scenarios/__init__.py")
+if not p.is_file():
+    print("WARN: scenarios/__init__.py not found — skip Claro removal")
+else:
+    text = p.read_text(encoding="utf-8")
+    new, n = re.subn(
+        r'^[ \t]*"scenarios\.claro\.scenario",\s*\n',
+        "",
+        text,
+        flags=re.MULTILINE,
+    )
+    if n:
+        p.write_text(new, encoding="utf-8")
+        print(f"Removed Claro scenario from registry ({n} line(s))")
+    elif "claro.scenario" in text:
+        print("WARN: claro present but pattern did not match — check scenarios/__init__.py")
+    else:
+        print("Claro already absent — OK")
+SCENARIO_PATCH_EOF
+
 echo "Installing Python dependencies..."
 # Install into a dedicated target dir — avoids PEP 668 / EXTERNALLY-MANAGED entirely
 PKGS_DIR="$DEMO_DIR/packages"
@@ -774,6 +799,7 @@ WorkingDirectory=${DEMO_DIR}
 Environment=PATH=${DEMO_DIR}/packages/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=PYTHONPATH=${DEMO_DIR}/packages
 Environment=OPERATOR_EMAIL=${PARTICIPANT_EMAIL}
+Environment=ACTIVE_SCENARIO=banking
 ExecStart=/usr/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port ${DEMO_PORT}
 Restart=on-failure
 RestartSec=5
@@ -807,11 +833,11 @@ DEMO_KIBANA_URL="${KIBANA_URL:-}"
 DEMO_API_KEY="${ELASTICSEARCH_API_KEY:-}"
 
 if [[ -n "$DEMO_KIBANA_URL" && -n "$DEMO_API_KEY" ]]; then
-  echo "Launching fanatics scenario against $DEMO_KIBANA_URL ..."
+  echo "Launching retail banking scenario against $DEMO_KIBANA_URL ..."
 
   curl -sf -X POST "http://localhost:${DEMO_PORT}/api/setup/launch" \
     -H 'Content-Type: application/json' \
-    -d "{\"scenario_id\":\"fanatics\",\"kibana_url\":\"${DEMO_KIBANA_URL}\",\"api_key\":\"${DEMO_API_KEY}\"}" \
+    -d "{\"scenario_id\":\"banking\",\"kibana_url\":\"${DEMO_KIBANA_URL}\",\"api_key\":\"${DEMO_API_KEY}\"}" \
     >/dev/null 2>&1 || echo "WARN: Launch request failed — learners can launch manually via the Demo App tab."
 
   echo "Waiting for deployment to register..."

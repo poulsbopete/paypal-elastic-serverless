@@ -84,7 +84,7 @@ enhanced_loading: null
 
 # Connect to Elastic Cloud & Deploy
 
-> **Workshop note:** The steps below match **[Elastic Autonomous Observability](https://play.instruqt.com/manage/elastic/tracks/elastic-autonomous-observability)** — the **Fanatics Live** scenario is auto-launched at track start. Sidebar notes may still describe a PayPal narrative; use the **live service names** from the demo (for example `auction-engine`, `card-printing-system`) in Kibana and ES|QL until challenge copy is updated.
+> **Workshop note:** This track auto-launches the **Retail Banking Platform** scenario (`banking`) at start and **does not list** the Claro NOC scenario in the picker. Sidebar notes may still describe a PayPal narrative; use **live banking service names** from the demo (for example `mobile-gateway`, `claims-processor`) in Kibana and ES|QL until challenge copy is fully updated.
 
 Your Elastic Cloud Serverless Observability project was **automatically provisioned** when this lab started — open the **Elastic Serverless** tab directly. No login required.
 
@@ -94,7 +94,7 @@ The demo platform is already running on this VM and has been pre-configured with
 
 ## Step 1 — Verify the Deployment is Running
 
-Open the **Demo App** tab. You should see the Fanatics Live scenario already deployed and sending telemetry. If the deployment bar is still in progress, wait a moment for it to complete.
+Open the **Demo App** tab. You should see the **Retail Banking Platform** scenario already deployed and sending telemetry. If the deployment bar is still in progress, wait a moment for it to complete.
 
 You can also confirm in the **Terminal** tab:
 

@@ -118,9 +118,9 @@ FROM logs*
 
 1. In the **Elastic Serverless** tab → **Observability → Infrastructure**
 2. You should see 3 hosts — one per cloud provider:
-   - `fanatics-aws-host-01`
-   - `fanatics-gcp-host-01`
-   - `fanatics-azure-host-01`
+   - `banking-aws-host-01`
+   - `banking-gcp-host-01`
+   - `banking-azure-host-01`
 3. Click a host to see CPU, memory, disk, and network metrics
 
 > **Note:** If hosts don't appear immediately, wait 1–2 minutes for the host metrics generator to send its first batch.
@@ -131,7 +131,7 @@ FROM logs*
 
 The deployer created an **Executive Dashboard** pre-configured for your scenario. Find it in:
 
-**Elastic Serverless** tab → **Dashboards** → search "Fanatics" (or "Executive")
+**Elastic Serverless** tab → **Dashboards** → search "Banking" or "Executive"
 
 ---
 

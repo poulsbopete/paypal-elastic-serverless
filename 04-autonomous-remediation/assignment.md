@@ -78,7 +78,7 @@ Once an alert fires, the **Significant Event Notification** workflow runs automa
 
 **Observability → Workflows**
 
-Find **Fanatics Collectibles Significant Event Notification** and click **Executions** to see:
+Find **Significant Event** notification rules for your deployment (search **Retail Banking** or **banking** if needed) and click **Executions** to see:
 - `count_errors` — ES|QL query counting recent errors
 - `run_rca` — AI agent root-cause analysis
 - `create_case` — Kibana case created with RCA findings
