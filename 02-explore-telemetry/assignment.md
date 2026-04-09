@@ -67,23 +67,23 @@ In **Elastic Serverless → Analytics → Discover**, switch to ES|QL mode and r
 
 **Order volume by service and subsystem:**
 ```esql
-FROM paypal-otel-logs
-| STATS trades = COUNT(*) BY service.name, subsystem
+FROM logs.otel
+| STATS trades = COUNT(*) BY resource.attributes.service.name, attributes.subsystem
 | SORT trades DESC
 ```
 
-**Distributed trace reconstruction — follow an order through the system:**
+**Distributed trace reconstruction — follow an order through the system (spans):**
 ```esql
-FROM paypal-otel-logs
-| WHERE transaction.name LIKE "*order*"
-| STATS span_count = COUNT(*), avg_latency_ms = AVG(transaction.duration.us) / 1000 BY service.name, transaction.name
+FROM traces.otel
+| WHERE transaction.name LIKE "*order*" OR span.name LIKE "*order*"
+| STATS span_count = COUNT(*), avg_latency_ms = AVG(transaction.duration.us) / 1000 BY resource.attributes.service.name, transaction.name
 | SORT avg_latency_ms DESC
 ```
 
 **Order gateway throughput over time:**
 ```esql
-FROM paypal-otel-logs
-| WHERE service.name == "order-gateway"
+FROM logs.otel
+| WHERE resource.attributes.service.name == "order-gateway"
 | STATS orders = COUNT(*) BY bucket = DATE_TRUNC(1 minute, @timestamp)
 | SORT bucket DESC
 | LIMIT 30
@@ -93,22 +93,22 @@ FROM paypal-otel-logs
 
 ## Step 2 — Latency & Performance
 
-**P99 latency by service — identify SLA breaches:**
+**P99 latency by service — identify SLA breaches (trace spans):**
 ```esql
-FROM paypal-otel-logs
+FROM traces.otel
 | WHERE transaction.duration.us IS NOT NULL
 | STATS
     p50_ms = PERCENTILE(transaction.duration.us, 50) / 1000,
     p99_ms = PERCENTILE(transaction.duration.us, 99) / 1000,
     max_ms = MAX(transaction.duration.us) / 1000
-  BY service.name
+  BY resource.attributes.service.name
 | SORT p99_ms DESC
 ```
 
 **Matching engine latency (should be < 500µs for SLA compliance):**
 ```esql
-FROM paypal-otel-logs
-| WHERE service.name == "matching-engine" AND transaction.duration.us IS NOT NULL
+FROM traces.otel
+| WHERE resource.attributes.service.name == "matching-engine" AND transaction.duration.us IS NOT NULL
 | STATS
     avg_us = AVG(transaction.duration.us),
     p99_us = PERCENTILE(transaction.duration.us, 99),
@@ -117,9 +117,9 @@ FROM paypal-otel-logs
 
 **Settlement processor — batch latency (higher is expected, watch for outliers):**
 ```esql
-FROM paypal-otel-logs
-| WHERE service.name == "settlement-processor"
-| STATS max_latency_ms = MAX(transaction.duration.us) / 1000, count = COUNT(*) BY service.name
+FROM traces.otel
+| WHERE resource.attributes.service.name == "settlement-processor"
+| STATS max_latency_ms = MAX(transaction.duration.us) / 1000, count = COUNT(*) BY resource.attributes.service.name
 ```
 
 ---
@@ -128,18 +128,18 @@ FROM paypal-otel-logs
 
 **Error rate by service — identify the most impacted services:**
 ```esql
-FROM paypal-otel-logs
+FROM logs.otel
 | STATS
     total = COUNT(*),
     errors = COUNT(*) WHERE severity_text == "ERROR"
-  BY service.name
+  BY resource.attributes.service.name
 | EVAL error_pct = ROUND(errors * 100.0 / total, 2)
 | SORT error_pct DESC
 ```
 
 **Find specific financial system errors:**
 ```esql
-FROM paypal-otel-logs
+FROM logs.otel
 | WHERE severity_text == "ERROR"
 | STATS count = COUNT(*) BY body.text
 | SORT count DESC
@@ -148,10 +148,10 @@ FROM paypal-otel-logs
 
 **Risk and compliance errors — regulatory impact:**
 ```esql
-FROM paypal-otel-logs
+FROM logs.otel
 | WHERE severity_text == "ERROR"
-  AND (service.name == "risk-calculator" OR service.name == "compliance-monitor" OR service.name == "fraud-detector")
-| KEEP @timestamp, service.name, body.text
+  AND (resource.attributes.service.name == "risk-calculator" OR resource.attributes.service.name == "compliance-monitor" OR resource.attributes.service.name == "fraud-detector")
+| KEEP @timestamp, resource.attributes.service.name, body.text
 | SORT @timestamp DESC
 | LIMIT 20
 ```
@@ -162,20 +162,20 @@ FROM paypal-otel-logs
 
 **Health by cloud provider:**
 ```esql
-FROM paypal-otel-logs
+FROM logs.otel
 | STATS
     total = COUNT(*),
     errors = COUNT(*) WHERE severity_text == "ERROR"
-  BY cloud.provider, cloud.region
+  BY resource.attributes.cloud.provider, resource.attributes.cloud.region
 | EVAL error_rate = ROUND(errors * 100.0 / total, 2)
 | SORT error_rate DESC
 ```
 
 **Instrument trading activity (order instrument distribution):**
 ```esql
-FROM paypal-otel-logs
-| WHERE instrument IS NOT NULL
-| STATS trades = COUNT(*) BY instrument
+FROM logs.otel
+| WHERE attributes.instrument IS NOT NULL
+| STATS trades = COUNT(*) BY attributes.instrument
 | SORT trades DESC
 | LIMIT 10
 ```
@@ -186,9 +186,9 @@ FROM paypal-otel-logs
 
 Open the Elastic AI Assistant and ask:
 
-> "Using paypal-otel-logs, show me a complete health summary of all 9 trading services: error rate, P99 latency, and total event count for the last 30 minutes."
+> "Using OTLP logs (`logs.otel`) and traces (`traces.otel`), show me a complete health summary of all 9 trading services: error rate, P99 latency, and total event count for the last 30 minutes."
 
-> "Which instruments and order types are generating the most errors in paypal-otel-logs?"
+> "Which instruments and order types are generating the most errors in OTLP logs (`logs.otel`)? (Hint: inspect log record attribute fields in the Discover field list.)"
 
 > "Compare the latency profile of matching-engine vs. settlement-processor. Which has more variance and why would that be expected?"
 
@@ -198,6 +198,6 @@ Open the Elastic AI Assistant and ask:
 
 You'll pass this challenge when:
 - The generator is running
-- At least 50 documents exist in `paypal-otel-logs`
+- At least 50 documents exist in OTLP log streams (`logs.otel`)
 - All 9 financial services are present
 - Error telemetry exists in the index

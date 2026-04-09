@@ -75,30 +75,30 @@ In **Elastic Serverless → Discover** (ES|QL mode):
 
 **Observe the recovery — error rate should be dropping:**
 ```esql
-FROM paypal-otel-logs
+FROM logs.otel
 | WHERE @timestamp > NOW() - 30 minutes
 | STATS errors = COUNT(*) WHERE severity_text == "ERROR"
-  BY service.name, bucket = DATE_TRUNC(2 minutes, @timestamp)
+  BY resource.attributes.service.name, bucket = DATE_TRUNC(2 minutes, @timestamp)
 | SORT bucket DESC, errors DESC
 | LIMIT 30
 ```
 
 **Full incident timeline — what happened and when:**
 ```esql
-FROM paypal-otel-logs
+FROM logs.otel
 | WHERE severity_text == "ERROR"
 | STATS
     first_error = MIN(@timestamp),
     last_error = MAX(@timestamp),
     peak_errors = COUNT(*)
-  BY service.name
+  BY resource.attributes.service.name
 | SORT peak_errors DESC
 ```
 
 **Latency recovery — confirm matching engine is back within SLA:**
 ```esql
-FROM paypal-otel-logs
-| WHERE service.name == "matching-engine" AND transaction.duration.us IS NOT NULL
+FROM traces.otel
+| WHERE resource.attributes.service.name == "matching-engine" AND transaction.duration.us IS NOT NULL
 | STATS p99_ms = PERCENTILE(transaction.duration.us, 99) / 1000
   BY bucket = DATE_TRUNC(2 minutes, @timestamp)
 | SORT bucket DESC
@@ -133,9 +133,9 @@ Review the three SLOs created for the financial platform:
 
 | SLO | Target | Indicator |
 |-----|--------|-----------|
-| **Availability SLO** | 95% | NOT event.outcome:failure |
-| **Latency SLO** | 85% requests < 2s | transaction.duration.us ≤ 2,000,000 |
-| **Error Rate SLO** | 95% | NOT event.outcome:failure |
+| **Availability SLO** | 95% | Logs (`logs-apm.otel-*`): good events = not ERROR severity |
+| **Latency SLO** | 85% spans < 2s | Traces (`traces-apm.otel-*`): `transaction.duration.us` ≤ 2,000,000 |
+| **Error Rate SLO** | 95% | Traces (`traces-apm.otel-*`): spans where `status.code` is not Error |
 
 Check the **burn rate** for each SLO — did the fault burn into our error budget?
 
@@ -145,37 +145,37 @@ Check the **burn rate** for each SLO — did the fault burn into our error budge
 
 **Build an incident MTTR report:**
 ```esql
-FROM paypal-otel-logs
+FROM logs.otel
 | STATS
     total_events = COUNT(*),
     error_events = COUNT(*) WHERE severity_text == "ERROR",
-    services_affected = COUNT_DISTINCT(service.name) WHERE severity_text == "ERROR"
+    services_affected = COUNT_DISTINCT(resource.attributes.service.name) WHERE severity_text == "ERROR"
 | EVAL overall_error_rate = ROUND(error_events * 100.0 / total_events, 2)
 ```
 
 **Cross-cloud incident impact (did one cloud provider take more errors?):**
 ```esql
-FROM paypal-otel-logs
+FROM logs.otel
 | STATS
     total = COUNT(*),
     errors = COUNT(*) WHERE severity_text == "ERROR"
-  BY cloud.provider
+  BY resource.attributes.cloud.provider
 | EVAL error_rate = ROUND(errors * 100.0 / total, 2)
 | SORT error_rate DESC
 ```
 
 **Settlement impact — did any T+2 settlements miss their deadline?**
 ```esql
-FROM paypal-otel-logs
-| WHERE service.name == "settlement-processor" AND severity_text == "ERROR"
-| STATS count = COUNT(*), error_types = VALUES(body.text) BY service.name
+FROM logs.otel
+| WHERE resource.attributes.service.name == "settlement-processor" AND severity_text == "ERROR"
+| STATS count = COUNT(*), error_types = VALUES(body.text) BY resource.attributes.service.name
 ```
 
 **Order types most impacted during fault:**
 ```esql
-FROM paypal-otel-logs
-| WHERE severity_text == "ERROR" AND order.type IS NOT NULL
-| STATS errors = COUNT(*) BY order.type
+FROM logs.otel
+| WHERE severity_text == "ERROR" AND `order.type` IS NOT NULL
+| STATS errors = COUNT(*) BY `order.type`
 | SORT errors DESC
 ```
 
@@ -185,9 +185,9 @@ FROM paypal-otel-logs
 
 Ask the Elastic AI Assistant these questions for a complete executive summary:
 
-> "Generate a complete incident report for the last 30 minutes from paypal-otel-logs. Include: services affected, peak error rates, latency impact, estimated duration, and recommended preventive measures."
+> "Generate a complete incident report for the last 30 minutes from OTLP logs (`logs.otel`). Include: services affected, peak error rates, latency impact, estimated duration, and recommended preventive measures."
 
-> "Based on the telemetry in paypal-otel-logs, did the order-gateway fault cascade to the matching-engine and risk-calculator? Show evidence from the data."
+> "Based on the telemetry in OTLP logs (`logs.otel`), did the order-gateway fault cascade to the matching-engine and risk-calculator? Show evidence from the data."
 
 > "What Elastic features (ML anomaly detection, SLOs, alerting, workflows) would provide the fastest time-to-detect for an OMS-BOOK-IMBALANCE event? Recommend an optimal monitoring setup."
 
@@ -215,4 +215,4 @@ You'll pass this challenge when:
 - The demo app is healthy
 - The generator is still running
 - No active fault channels remain
-- Substantial telemetry has accumulated in `paypal-otel-logs`
+- Substantial telemetry has accumulated in OTLP log streams (`logs.otel`)

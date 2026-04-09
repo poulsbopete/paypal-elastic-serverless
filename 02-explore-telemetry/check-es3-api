@@ -30,21 +30,21 @@ systemctl is-active --quiet paypal-otel-gen 2>/dev/null \
   || fail "PayPal telemetry generator stopped. Restart: systemctl start paypal-otel-gen"
 pass "Telemetry generator is running"
 
-# ── Substantial data in paypal-otel-logs ──────────────────────────────────────
-DOC_COUNT=$(curl -sf "${ES_URL}/paypal-otel-logs/_count" \
+# ── Substantial data in OTLP log streams ─────────────────────────────────────
+DOC_COUNT=$(curl -sf "${ES_URL}/logs-apm.otel-*/_count" \
   -H "Authorization: ApiKey ${API_KEY}" 2>/dev/null \
   | python3 -c "import sys,json; print(json.load(sys.stdin).get('count',0))" 2>/dev/null || echo "0")
 
 if [[ "$DOC_COUNT" -lt 50 ]]; then
   fail "Only $DOC_COUNT documents so far. Wait a minute for more data to accumulate, then retry."
 fi
-pass "$DOC_COUNT documents in paypal-otel-logs ✓"
+pass "$DOC_COUNT documents in logs-apm.otel-* ✓"
 
 # ── All 9 financial services present ──────────────────────────────────────────
-SVC_LIST=$(curl -sf "${ES_URL}/paypal-otel-logs/_search" \
+SVC_LIST=$(curl -sf "${ES_URL}/logs-apm.otel-*/_search" \
   -H "Authorization: ApiKey ${API_KEY}" \
   -H "Content-Type: application/json" \
-  -d '{"size":0,"aggs":{"svcs":{"terms":{"field":"service.name.keyword","size":20}}}}' 2>/dev/null \
+  -d '{"size":0,"aggs":{"svcs":{"terms":{"field":"resource.attributes.service.name","size":20}}}}' 2>/dev/null \
   | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
@@ -61,7 +61,7 @@ else
 fi
 
 # ── Errors are present (realistic error rate) ─────────────────────────────────
-ERROR_COUNT=$(curl -sf "${ES_URL}/paypal-otel-logs/_count" \
+ERROR_COUNT=$(curl -sf "${ES_URL}/logs-apm.otel-*/_count" \
   -H "Authorization: ApiKey ${API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{"query":{"term":{"severity_text":"ERROR"}}}' 2>/dev/null \

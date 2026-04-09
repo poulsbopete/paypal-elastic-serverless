@@ -64,7 +64,7 @@ except: print('')
 " 2>/dev/null || echo "")
 
 if [[ -n "$ES_URL" && -n "$API_KEY" ]]; then
-  DOC_COUNT=$(curl -sf "${ES_URL}/paypal-otel-logs/_count" \
+  DOC_COUNT=$(curl -sf "${ES_URL}/logs-apm.otel-*/_count" \
     -H "Authorization: ApiKey ${API_KEY}" 2>/dev/null \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('count',0))" 2>/dev/null || echo "0")
   pass "Total telemetry in Elastic: $DOC_COUNT documents across all 9 financial platform services ✓"

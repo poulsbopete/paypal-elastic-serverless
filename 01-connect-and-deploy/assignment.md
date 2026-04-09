@@ -84,22 +84,41 @@ enhanced_loading: null
 
 # Challenge 1 — Connect & Deploy
 
+This challenge follows the same flow as [Elastic Autonomous Observability](https://play.instruqt.com/manage/elastic/tracks/elastic-autonomous-observability): the VM provisions Serverless, then the **elastic-launch-demo** app receives your **Kibana URL** and **API key** and calls **`/api/setup/launch`** so the PayPal (financial) scenario runs and sends OpenTelemetry to Elastic.
+
 ## What's Running
 
-Your Elastic Serverless project is already provisioned. A standalone telemetry generator (`paypal-otel-gen`) is sending live data from **9 financial platform services** — order-gateway, matching-engine, risk-calculator, market-data-feed, settlement-processor, fraud-detector, compliance-monitor, customer-portal, and audit-logger — all to the `paypal-otel-logs` index.
-
-The Demo App tab shows the **PayPal Operations Center** (financial scenario), with live service health, active fault channels, and the Chaos Controller for fault injection.
+Your Elastic Serverless project is provisioned at track start. A background **`paypal-otel-gen`** service sends PayPal-shaped telemetry over **OTLP** into Elastic **APM OpenTelemetry** data streams (`logs-apm.otel-*`, `traces-apm.otel-*`, `metrics-apm.otel-*`), so Kibana has data even if the Demo App is still connecting.
 
 ---
 
-## Step 1 — Open the Demo App
+## Step 1 — Verify the Demo App deployment (same idea as EAO)
 
-Click the **Demo App** tab (or **Chaos Controller** — same app on port 8090). You should see:
-- **PayPal Operations Center** — Bloomberg terminal-style dashboard
-- **9 services** across AWS, GCP, and Azure in green (healthy) state
-- **Chaos Controller** — 20 financial fault channels ready to inject
+Open the **Demo App** tab. After setup completes you should see the **PayPal Operations Center** with services healthy and telemetry flowing.
 
-If the scenario is not running, click **Select Scenario → Financial Trading Platform** and launch it.
+**If you see empty Kibana URL / API key fields** (or “Enter Kibana URL and API key”), the app is waiting for a launch — same as manually connecting in the upstream lab.
+
+1. Open the **Terminal** tab and print credentials (works without `INSTRUQT_AUTH_TOKEN`; do **not** rely on `agent variable get` in learner shells):
+
+   ```bash
+   demo-credentials
+   ```
+
+2. Paste **Kibana URL** and **API key** into the Demo App, then **Test Connection** → **Launch**.
+
+3. Confirm a deployment is running:
+
+   ```bash
+   demo-deployments
+   ```
+
+   If nothing is running, auto-launch can be retried without restarting the track:
+
+   ```bash
+   sudo ensure-elastic-deployment.sh
+   ```
+
+**Important:** `demo-restart` restarts the demo **process**. Deployments are held **in memory**, so after a restart the UI can return to the empty connect form — run **`ensure-elastic-deployment.sh`** (or paste credentials and **Launch** again). This matches how the upstream demo app behaves.
 
 ---
 
@@ -117,40 +136,40 @@ Click **Try ES|QL** and explore the financial platform data:
 
 **Count all telemetry by service:**
 ```esql
-FROM paypal-otel-logs
-| STATS count = COUNT(*) BY service.name
+FROM logs.otel
+| STATS count = COUNT(*) BY resource.attributes.service.name
 | SORT count DESC
 ```
 
 **Look for trading errors:**
 ```esql
-FROM paypal-otel-logs
+FROM logs.otel
 | WHERE severity_text == "ERROR"
-| STATS errors = COUNT(*) BY service.name
+| STATS errors = COUNT(*) BY resource.attributes.service.name
 | SORT errors DESC
 ```
 
-**Check order latency by service:**
+**Check span latency by service (OTLP traces):**
 ```esql
-FROM paypal-otel-logs
+FROM traces.otel
 | WHERE transaction.duration.us IS NOT NULL
-| STATS p99_ms = MAX(transaction.duration.us) / 1000 BY service.name
+| STATS p99_ms = MAX(transaction.duration.us) / 1000 BY resource.attributes.service.name
 | SORT p99_ms DESC
 ```
 
 **Search for OMS errors (Order Book Imbalance):**
 ```esql
-FROM paypal-otel-logs
+FROM logs.otel
 | WHERE body.text LIKE "*OMS-BOOK-IMBALANCE*" OR body.text LIKE "*ME-LATENCY-SLA*"
-| KEEP @timestamp, service.name, body.text
+| KEEP @timestamp, resource.attributes.service.name, body.text
 | SORT @timestamp DESC
 | LIMIT 20
 ```
 
 **View data by cloud provider and region:**
 ```esql
-FROM paypal-otel-logs
-| STATS services = COUNT_DISTINCT(service.name), events = COUNT(*) BY cloud.provider, cloud.region
+FROM logs.otel
+| STATS services = COUNT_DISTINCT(resource.attributes.service.name), events = COUNT(*) BY resource.attributes.cloud.provider, resource.attributes.cloud.region
 | SORT events DESC
 ```
 
@@ -172,9 +191,9 @@ These assets were automatically created during setup:
 
 Open the **Elastic AI Assistant** and ask:
 
-> "What is the current error rate for each of the 9 trading services in paypal-otel-logs over the last 30 minutes?"
+> "What is the current error rate for each of the 9 trading services in OTLP log streams (`logs.otel`) over the last 30 minutes?"
 
-> "Show me the top error types in paypal-otel-logs, grouped by service.name. What patterns suggest a systemic issue?"
+> "Show me the top error types in OTLP log streams (`logs.otel`), grouped by resource.attributes.service.name. What patterns suggest a systemic issue?"
 
 > "Which services have the highest P99 latency? Are any exceeding their SLA thresholds?"
 
@@ -185,5 +204,5 @@ Open the **Elastic AI Assistant** and ask:
 You'll pass this challenge when:
 - The demo app is healthy
 - The telemetry generator is running
-- At least 10 documents exist in `paypal-otel-logs`
+- At least 10 documents exist in OTLP log streams (`logs.otel`)
 - All 9 financial services are represented in the data

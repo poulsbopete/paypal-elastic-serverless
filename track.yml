@@ -13,6 +13,7 @@ tags:
 - serverless
 - paypal
 - observability
+- paypal-workshop
 - co.elastic.workshops
 owner: elastic
 developers:
@@ -29,5 +30,5 @@ lab_config:
     name: modern-dark
   override_challenge_layout: false
   hideStopButton: false
-checksum: "3429536682248979359"
+checksum: "2757049887292402528"
 enhanced_loading: false

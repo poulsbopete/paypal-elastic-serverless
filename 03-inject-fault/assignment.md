@@ -85,9 +85,9 @@ You should see:
 If alerts aren't yet visible, run this ES|QL query in **Discover** to confirm errors are flowing:
 
 ```esql
-FROM paypal-otel-logs
+FROM logs.otel
 | WHERE severity_text == "ERROR"
-  AND (service.name == "order-gateway" OR service.name == "matching-engine")
+  AND (resource.attributes.service.name == "order-gateway" OR resource.attributes.service.name == "matching-engine")
 | STATS errors = COUNT(*) BY bucket = DATE_TRUNC(1 minute, @timestamp)
 | SORT bucket DESC
 | LIMIT 10
@@ -99,21 +99,21 @@ FROM paypal-otel-logs
 
 **Find the specific OMS fault signatures:**
 ```esql
-FROM paypal-otel-logs
+FROM logs.otel
 | WHERE body.text LIKE "*OMS-BOOK-IMBALANCE*" OR body.text LIKE "*ME-LATENCY-SLA*"
-| KEEP @timestamp, service.name, body.text, severity_text
+| KEEP @timestamp, resource.attributes.service.name, body.text, severity_text
 | SORT @timestamp DESC
 | LIMIT 20
 ```
 
 **Measure the error rate spike:**
 ```esql
-FROM paypal-otel-logs
+FROM logs.otel
 | WHERE @timestamp > NOW() - 15 minutes
 | STATS
     total = COUNT(*),
     errors = COUNT(*) WHERE severity_text == "ERROR"
-  BY service.name
+  BY resource.attributes.service.name
 | EVAL error_pct = ROUND(errors * 100.0 / total, 2)
 | WHERE error_pct > 0
 | SORT error_pct DESC
@@ -121,19 +121,19 @@ FROM paypal-otel-logs
 
 **Trace cascade impact — did matching engine errors affect settlement?**
 ```esql
-FROM paypal-otel-logs
+FROM logs.otel
 | WHERE severity_text == "ERROR"
   AND @timestamp > NOW() - 15 minutes
-| STATS count = COUNT(*) BY service.name
+| STATS count = COUNT(*) BY resource.attributes.service.name
 | SORT count DESC
 ```
 
 **Compare error rates: before vs. during the fault:**
 ```esql
-FROM paypal-otel-logs
-| WHERE service.name IN ("order-gateway", "matching-engine", "risk-calculator")
+FROM logs.otel
+| WHERE resource.attributes.service.name IN ("order-gateway", "matching-engine", "risk-calculator")
 | STATS errors = COUNT(*) WHERE severity_text == "ERROR"
-  BY service.name, bucket = DATE_TRUNC(2 minutes, @timestamp)
+  BY resource.attributes.service.name, bucket = DATE_TRUNC(2 minutes, @timestamp)
 | SORT bucket DESC, errors DESC
 ```
 
@@ -151,9 +151,9 @@ Navigate to **Kibana → Machine Learning → Anomaly Detection**. Look for:
 
 Open the **Elastic AI Assistant** and ask:
 
-> "I'm seeing OMS-BOOK-IMBALANCE errors in paypal-otel-logs for the order-gateway and matching-engine services starting in the last 15 minutes. What is the likely root cause and which other services are at risk of cascading failure?"
+> "I'm seeing OMS-BOOK-IMBALANCE errors in OTLP logs (`logs.otel`) for the order-gateway and matching-engine services starting in the last 15 minutes. What is the likely root cause and which other services are at risk of cascading failure?"
 
-> "Query paypal-otel-logs for error patterns in the last 10 minutes. Show me the error rate per service and identify the primary fault source."
+> "Query OTLP logs (`logs.otel`) for error patterns in the last 10 minutes. Show me the error rate per service and identify the primary fault source."
 
 > "The matching engine has elevated latency. What does 'OMS-BOOK-IMBALANCE' mean in a trading system context and what immediate remediation steps should we take?"
 
@@ -176,4 +176,4 @@ Navigate to **Kibana → Observability → Alerts** to see the active incidents 
 You'll pass this challenge when:
 - The demo app is healthy
 - A fault has been injected via the Chaos Controller
-- Error telemetry from the fault is present in `paypal-otel-logs`
+- Error telemetry from the fault is present in OTLP log streams (`logs.otel`)

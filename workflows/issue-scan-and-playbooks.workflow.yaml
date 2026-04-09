@@ -1,0 +1,202 @@
+# Issue scan & remediation playbooks — Kibana Workflow (YAML)
+#
+# Purpose: Surface recent error/latency signals and emit deterministic SRE playbooks
+# (fits a “give us one incident + sample logs — replay the investigation flow” CTA).
+#
+# Import: Kibana → Workflows → Create → Import from file (or POST /api/workflows with
+#         { "workflows": [ ... ] } using the JSON equivalent if your automation expects JSON).
+#
+# Indices: APM OpenTelemetry data streams — errors from logs-apm.otel-*, slow spans from
+#          traces-apm.otel-*. Adjust paths if your deployment uses different stream names.
+#
+# Docs: https://www.elastic.co/docs/explore-analyze/workflows/steps/elasticsearch
+#       https://www.elastic.co/docs/explore-analyze/workflows/steps/if
+
+name: Issue scan & remediation playbooks
+enabled: true
+description: >
+  Scans the last hour for ERROR logs (by service) and slow trace spans, then prints
+  concrete investigation and mitigation steps. Extend with Agent Builder or Cases by
+  adding steps after the console summary (e.g. kibana.request to create a case).
+
+triggers:
+  - type: manual
+  - type: scheduled
+    with:
+      every: 6h
+
+steps:
+  - name: start_banner
+    type: console
+    with:
+      message: |
+        ============================================================
+        Issue scan — execution {{ execution.id }}
+        Started: {{ now | date: '%Y-%m-%d %H:%M:%S UTC' }}
+        Window: last 1 hour (adjust body in workflow if needed)
+        ============================================================
+
+  - name: errors_by_service
+    type: elasticsearch.request
+    with:
+      method: POST
+      path: /logs-apm.otel-*/_search
+      body:
+        size: 0
+        track_total_hits: true
+        query:
+          bool:
+            filter:
+              - range:
+                  "@timestamp":
+                    gte: now-1h
+              - term:
+                  severity_text: ERROR
+        aggs:
+          by_service:
+            terms:
+              field: resource.attributes.service.name
+              size: 20
+              order:
+                _count: desc
+
+  - name: slow_transactions
+    type: elasticsearch.request
+    with:
+      method: POST
+      path: /traces-apm.otel-*/_search
+      body:
+        size: 0
+        track_total_hits: true
+        query:
+          bool:
+            filter:
+              - range:
+                  "@timestamp":
+                    gte: now-1h
+              - range:
+                  transaction.duration.us:
+                    gt: 2000000
+        aggs:
+          slow_by_service:
+            terms:
+              field: resource.attributes.service.name
+              size: 15
+              order:
+                _count: desc
+
+  - name: sample_error_messages
+    type: elasticsearch.request
+    with:
+      method: POST
+      path: /logs-apm.otel-*/_search
+      body:
+        size: 5
+        sort:
+          - "@timestamp": desc
+        query:
+          bool:
+            filter:
+              - range:
+                  "@timestamp":
+                    gte: now-1h
+              - term:
+                  severity_text: ERROR
+        _source:
+          includes:
+            - "@timestamp"
+            - resource.attributes.service.name
+            - body.text
+            - trace.id
+
+  - name: branch_errors_present
+    type: if
+    condition: "steps.errors_by_service.output.hits.total.value > 0"
+    steps:
+      - name: playbook_error_spike
+        type: console
+        with:
+          message: |
+            --- SIGNAL: ERROR traffic (last 1h) ---
+            Total matching ERROR documents: {{ steps.errors_by_service.output.hits.total.value }}
+
+            Recommended next steps:
+            1) ES|QL — error mix by service:
+               FROM logs.otel
+               | WHERE @timestamp > now() - 1 hour AND severity_text == "ERROR"
+               | STATS c = COUNT(*) BY resource.attributes.service.name
+               | SORT c DESC
+
+            2) ES|QL — sample messages + trace correlation:
+               FROM logs.otel
+               | WHERE @timestamp > now() - 1 hour AND severity_text == "ERROR"
+               | KEEP @timestamp, resource.attributes.service.name, body.text, trace.id
+               | SORT @timestamp DESC
+               | LIMIT 50
+
+            3) Observability: open Services view for the noisiest resource.attributes.service.name; check deployments
+               and upstream dependencies for the same trace.id.
+
+            4) If pattern is new — create/update alert + on-call runbook; if recurring — open
+               SLO / error-budget view for that service.
+
+            5) Optional: enable or tune Elastic Streams on this data stream so statistically
+               unusual log bursts surface as Significant Events before dashboards are checked.
+
+    else:
+      - name: playbook_no_errors
+        type: console
+        with:
+          message: |
+            No ERROR documents in logs-apm.otel-* for the last 1h (by current query).
+            Still check latency, saturation, and business KPIs — errors are not the only signal.
+
+  - name: branch_slow_present
+    type: if
+    condition: "steps.slow_transactions.output.hits.total.value > 0"
+    steps:
+      - name: playbook_latency
+        type: console
+        with:
+          message: |
+            --- SIGNAL: slow spans (> 2s) ---
+            Total slow spans: {{ steps.slow_transactions.output.hits.total.value }}
+
+            Recommended next steps:
+            1) ES|QL — slow span scan:
+               FROM traces.otel
+               | WHERE @timestamp > now() - 1 hour AND transaction.duration.us > 2000000
+               | STATS n = COUNT(*), slow_ms = MAX(transaction.duration.us) / 1000000 BY resource.attributes.service.name
+               | SORT slow_ms DESC
+
+            2) Correlate with traces for the worst resource.attributes.service.name; inspect downstream spans.
+
+            3) Check feature flags / recent releases for that service; scale or throttle if
+               dependency latency increased.
+
+    else:
+      - name: playbook_no_slow
+        type: console
+        with:
+          message: |
+            No spans > 2s recorded in traces-apm.otel-* for the last 1h (by transaction.duration.us).
+            If users still report slowness, verify OTLP traces include duration and service resource attributes.
+
+  - name: dump_recent_error_samples
+    type: foreach
+    foreach: "{{ steps.sample_error_messages.output.hits.hits }}"
+    steps:
+      - name: line_sample
+        type: console
+        with:
+          message: |-
+            SAMPLE ERROR | {{ foreach.item._source['@timestamp'] }} | svc={{ foreach.item._source['resource.attributes.service.name'] }} | trace={{ foreach.item._source['trace.id'] }} | {{ foreach.item._source['body.text'] }}
+
+  - name: end_banner
+    type: console
+    with:
+      message: |
+        ============================================================
+        Scan complete. Use the playbooks above as a checklist; wire this workflow to
+        Alerts (Connectors → Workflows) or Agent Builder tools for interactive RCA.
+        ============================================================

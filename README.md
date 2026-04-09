@@ -132,9 +132,9 @@ Three ML jobs are created automatically and start scanning telemetry in real tim
 
 | Job ID | Detector | Data |
 |---|---|---|
-| `paypal-service-error-spike` | `high_count` errors by `service.name` | `logs-apm.otel-*` (ERROR only) |
-| `paypal-transaction-volume-anomaly` | `count` by `service.name` | `logs-apm.otel-*` (all logs) |
-| `paypal-checkout-degradation` | `high_count` errors in checkout pipeline | `logs-apm.otel-*` (checkout/payments/fraud services) |
+| `paypal-service-error-spike` | `high_count` errors by `resource.attributes.service.name` | `logs-apm.otel-*` (ERROR only) |
+| `paypal-trade-volume-anomaly` | `count` by `resource.attributes.service.name` | `logs-apm.otel-*` (all logs) |
+| `paypal-trading-pipeline-degradation` | `high_count` errors in trading pipeline | `logs-apm.otel-*` (order-gateway, matching-engine, risk, market-data) |
 
 View in Kibana: **Analytics → Machine Learning → Anomaly Detection → Anomaly Explorer**
 
@@ -142,23 +142,23 @@ View in Kibana: **Analytics → Machine Learning → Anomaly Detection → Anoma
 
 ## ES|QL Quick Reference
 
-All queries use the `logs-apm.otel-*` index pattern (data stream alias `logs.otel` also works after setup):
+Queries target **APM OpenTelemetry** data streams (`logs-apm.otel-*`, `traces-apm.otel-*`, …). After setup, aliases `logs.otel` / `traces.otel` / `metrics.otel` also work in ES|QL:
 
 ```esql
--- Sanity check: confirm data is flowing
+-- Sanity check: confirm OTLP logs are flowing
 FROM logs-apm.otel-*
-| STATS total = COUNT(*), services = COUNT_DISTINCT(service.name)
+| STATS total = COUNT(*), services = COUNT_DISTINCT(resource.attributes.service.name)
 
 -- Errors by service (last 30 min)
 FROM logs-apm.otel-*
 | WHERE @timestamp > NOW() - 30 minutes AND severity_text == "ERROR"
-| STATS errors = COUNT(*) BY service.name
+| STATS errors = COUNT(*) BY resource.attributes.service.name
 | SORT errors DESC
 
 -- Recent error log messages for a specific service
 FROM logs-apm.otel-*
-| WHERE service.name == "payments-orchestrator" AND severity_text == "ERROR"
-| KEEP @timestamp, service.name, body.text, trace.id
+| WHERE resource.attributes.service.name == "payments-orchestrator" AND severity_text == "ERROR"
+| KEEP @timestamp, resource.attributes.service.name, body.text, trace.id
 | SORT @timestamp DESC
 | LIMIT 20
 ```
@@ -167,7 +167,7 @@ FROM logs-apm.otel-*
 
 | OTel Concept | Field in Elastic | Example |
 |---|---|---|
-| Service identifier | `service.name` | `checkout-service` |
+| Service identifier | `resource.attributes.service.name` | `checkout-service` |
 | Log message body | `body.text` | `Payment declined: timeout` |
 | Log severity | `severity_text` | `ERROR`, `INFO`, `WARN` |
 | Trace correlation ID | `trace.id` | `4f8a2c3d...` |
@@ -180,7 +180,7 @@ FROM logs-apm.otel-*
 
 | CAL Field | OTel Semantic Convention | Notes |
 |---|---|---|
-| `CAL_TYPE` | `service.name` | Standard across all CNCF tooling |
+| `CAL_TYPE` | `resource.attributes.service.name` | OpenTelemetry `service.name` resource attribute |
 | `TXN_ID` | `trace.id` | Native distributed trace correlation |
 | `MERCHANT_ID` | `merchant.id` | Custom resource attribute |
 | `STATUS` | `http.response.status_code` | Numeric HTTP status |
@@ -195,6 +195,7 @@ Run these in the **Terminal** tab on the Instruqt VM:
 
 | Command | What it does |
 |---|---|
+| `demo-credentials` | Print Kibana URL + API key for the Demo App (no `INSTRUQT_AUTH_TOKEN`; same recovery path as EAO) |
 | `demo-logs` | Stream live demo app logs (`journalctl -f`) |
 | `demo-otlp-test` | Test OTLP auth + connectivity; shows exact HTTP status and data stream existence |
 | `demo-otlp-errors` | Grep app logs for OTLP warnings and errors |
@@ -202,6 +203,12 @@ Run these in the **Terminal** tab on the Instruqt VM:
 | `demo-chaos` | Show chaos channel states |
 | `demo-status` | Show full demo app status JSON |
 | `demo-restart` | Restart the demo app (systemd) |
+
+### Executive dashboard shows N/A / (null) after restart
+
+The PayPal Executive Dashboard uses **OTLP-backed** data views (`logs*`, `traces-*`, `metrics-*`) with OpenTelemetry-oriented fields (for example `resource.attributes.service.name`, span `status.code`, `transaction.duration.us`). The background **`paypal-otel-gen`** service sends logs, traces, and metrics over OTLP so tiles stay populated even when the Demo App is reconnecting. NGINX/VPC panels still target generic `logs*` integrations and may stay empty in this lab.
+
+Widen time to **Last 30 minutes** if needed; the dashboard default is **now-30m**.
 
 ### Common OTLP troubleshooting
 

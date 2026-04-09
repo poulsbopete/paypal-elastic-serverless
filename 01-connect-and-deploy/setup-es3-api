@@ -23,3 +23,16 @@ else
   log "ERROR: App still not healthy. Check: journalctl -u elastic-demo"
   exit 1
 fi
+
+# Track setup may finish before /api/setup/launch completes; learners land on an empty form.
+if [[ -x /usr/local/bin/ensure-elastic-deployment.sh ]]; then
+  log "Ensuring demo deployment is active (auto-launch if needed)..."
+  for attempt in 1 2 3; do
+    if /usr/local/bin/ensure-elastic-deployment.sh; then
+      log "Deployment ensure OK ✓"
+      break
+    fi
+    log "ensure attempt $attempt failed — retrying in 30s..."
+    sleep 30
+  done
+fi

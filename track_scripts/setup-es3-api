@@ -246,8 +246,8 @@ p{font-size:13px;line-height:1.7;color:#94a3b8}a.btn{display:inline-block;margin
 <h1>PayPal Merchant Observability &mdash; Elastic Serverless + OpenTelemetry</h1>
 <div class="card"><h2>The Problem</h2><p>CAL logging is proprietary and siloed. Traces, metrics, and logs live in separate tools. Correlating a merchant complaint to root cause requires hopping between 3–5 systems. High-cardinality metrics (merchant IDs, transaction IDs) overwhelm traditional backends.</p></div>
 <div class="card"><h2>The Solution</h2><p>Elastic Serverless + OpenTelemetry replaces CAL with a vendor-neutral schema, unifies all signals in one platform, and handles PayPal-scale cardinality. Zero cluster management. Native OTLP. Built-in AI Assistant. Autonomous remediation workflows.</p></div>
-<div class="card"><h2>CAL → OTel Mapping</h2><p>CAL_TYPE → service.name &nbsp;|&nbsp; TXN_ID → trace.id &nbsp;|&nbsp; MERCHANT_ID → merchant.id &nbsp;|&nbsp; DURATION_MS → span duration &nbsp;|&nbsp; STATUS → http.response.status_code</p></div>
-<div class="card"><h2>ES|QL at Merchant Scale</h2><p>One query language across logs, metrics, and traces:<br><code style="color:#38bdf8">FROM paypal-otel-logs | WHERE merchant.id == "M-98231" AND severity_text == "ERROR" | STATS errors = COUNT(*) BY service.name</code></p></div>
+<div class="card"><h2>CAL → OTel Mapping</h2><p>CAL_TYPE → resource.attributes.service.name (OTel <code>service.name</code>) &nbsp;|&nbsp; TXN_ID → trace.id &nbsp;|&nbsp; MERCHANT_ID → merchant.id &nbsp;|&nbsp; DURATION_MS → span duration &nbsp;|&nbsp; STATUS → span/http status fields</p></div>
+<div class="card"><h2>ES|QL at Merchant Scale</h2><p>One query language across OTLP-backed streams:<br><code style="color:#38bdf8">FROM logs.otel | WHERE severity_text == "ERROR" | STATS errors = COUNT(*) BY resource.attributes.service.name</code></p></div>
 <div class="card"><h2>9 Services Running Now</h2><p>order-gateway · matching-engine · risk-calculator · market-data-feed · settlement-processor · fraud-detector · compliance-monitor · customer-portal · audit-logger — all emitting live OTLP telemetry to your Elastic Serverless project.</p></div>
 <div class="card"><h2>O11Y Survivors</h2><p>Play while your environment provisions. Click inside the game to capture keyboard focus.</p><div class="game-wrap"><iframe title="O11Y Survivors" src="https://poulsbopete.github.io/Vampire-Clone/" allow="fullscreen; autoplay" loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe></div><p class="game-hint">Hosted at <a href="https://poulsbopete.github.io/Vampire-Clone/" target="_blank" rel="noopener noreferrer">poulsbopete.github.io/Vampire-Clone</a></p></div>
 <a class="btn" href="/app/dashboards#/list?_g=(filters:!(),refreshInterval:(pause:!f,value:30000),time:(from:now-30m,to:now))">Open Kibana Dashboards &rarr;</a>
@@ -1264,14 +1264,9 @@ else
 fi
 
 # ── Standalone PayPal OTLP Generator ──────────────────────────────────────────
-# The demo app's OTLP pipeline can silently fail to set its endpoint (the
-# deployer uses HEAD which Elastic rejects, then ignores the provided otlp_url).
-# As a guaranteed fallback, we run a separate systemd service that sends
-# realistic PayPal-shaped logs, metrics, and traces directly via httpx.
-# This service runs alongside the demo app and ensures data always flows.
-# Install the generator whenever we have ES credentials — DEMO_OTLP_URL is
-# optional (used only for the OTLP probe; generator falls back to ES _bulk).
-if [[ -n "$ELASTICSEARCH_API_KEY" && -n "$ES_URL" ]]; then
+# Sends PayPal-shaped OTLP logs, traces, and metrics to the Serverless ingest
+# endpoint only (no ES _bulk / custom indices). Requires a working OTLP URL.
+if [[ -n "$ELASTICSEARCH_API_KEY" && -n "$ES_URL" && -n "$DEMO_OTLP_URL" ]]; then
   echo "Writing PayPal OTLP generator config..."
   # Read all credentials directly from project_results.json.
   # Do NOT use `agent variable get` — it requires INSTRUQT_AUTH_TOKEN which
@@ -1333,7 +1328,7 @@ OTLP_CFG_EOF
 Sends realistic PayPal-shaped logs, traces, and metrics to Elastic Serverless.
 Reads credentials from /tmp/paypal-otlp.json written by setup-es3-api."""
 
-import json, time, random, logging, sys, os, hashlib, ssl, base64
+import json, time, random, logging, sys, os, ssl, base64
 import urllib.request, urllib.error
 
 logging.basicConfig(
@@ -1379,9 +1374,6 @@ LOG_MESSAGES = {
     'audit-logger':         ['Trade event logged', 'Audit record written', 'Replication to DR confirmed', 'Sequence validated',
                              'AUDIT-SEQ-GAP: missing sequence', 'AUDIT-REPLICATION-LAG: DR behind', 'Journal write failed'],
 }
-
-def _rand_id(n=16):
-    return hashlib.sha256(str(random.random()).encode()).hexdigest()[:n*2]
 
 def _otlp_id(n_bytes):
     """Return n_bytes of random data base64-encoded — required by OTLP JSON spec.
@@ -1527,136 +1519,6 @@ def probe_otlp_auth(url, apm_key, api_key, basic_auth):
         log.warning('  rejected: %s', body[:200])
     return None
 
-def _bulk_write(es_url, auth_header, index, docs):
-    """Write docs to an ES index/data-stream via _bulk.
-    Returns (success_count, error_reason_or_None)."""
-    lines = []
-    for doc in docs:
-        lines.append('{"create":{}}')
-        lines.append(json.dumps(doc))
-    body = ('\n'.join(lines) + '\n').encode()
-    req = urllib.request.Request(
-        f'{es_url}/{index}/_bulk', data=body,
-        headers={'Authorization': auth_header, 'Content-Type': 'application/x-ndjson'},
-        method='POST')
-    try:
-        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=15) as r:
-            resp = json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        return 0, f'HTTP {e.code}: {e.read().decode("utf-8","replace")[:200]}'
-    except Exception as e:
-        return 0, str(e)
-
-    if resp.get('errors'):
-        errors = [i.get('create',{}).get('error',{}).get('reason','?')
-                  for i in resp.get('items',[]) if i.get('create',{}).get('error')]
-        if errors:
-            return 0, errors[0]
-    successes = sum(1 for i in resp.get('items',[])
-                    if i.get('create',{}).get('status') in (200,201))
-    return successes, None
-
-def es_bulk_write(es_url, auth_header, index, docs):
-    n, err = _bulk_write(es_url, auth_header, index, docs)
-    if err:
-        log.warning('ES bulk [%s] error: %s', index, err)
-        return False
-    return n > 0
-
-def probe_es_direct(es_url, api_key):
-    """Try writing a test doc directly to ES; return (auth_header, index) or None.
-
-    Use paypal-otel-logs (plain index, dynamic mapping, no ingest pipeline) first.
-    The managed logs-apm.otel-default data stream has an APM ingest pipeline that
-    reroutes/drops non-OTel documents while still returning HTTP 200 per item.
-    """
-    if not es_url or not api_key:
-        return None
-    auth = f'ApiKey {api_key}'
-    from datetime import datetime, timezone
-    test_doc = {
-        '@timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-        'service.name': 'order-gateway',
-        'severity_text': 'INFO',
-        'body.text': 'ES-direct probe',
-        'trace.id': 'probe000',
-        'trade.id': 'TRD-PROBE',
-    }
-    # paypal-otel-logs is a plain index — dynamic mapping, no ingest pipeline.
-    # logs-apm.otel-default pipeline drops non-OTel docs while returning HTTP 200.
-    for index in ('paypal-otel-logs', 'paypal-logs-default'):
-        n, err = _bulk_write(es_url, auth, index, [test_doc])
-        log.info('ES probe [%s]: %s', index, 'OK' if n > 0 else f'FAIL – {err}')
-        if n > 0:
-            log.info('ES DIRECT WRITE OK ✓ — using index [%s]', index)
-            return auth, index
-    return None
-
-TRANSACTION_NAMES = {
-    'order-gateway':        ['POST /api/order/new','GET /api/order/status','PUT /api/order/cancel'],
-    'matching-engine':      ['POST /api/match/execute','GET /api/book/snapshot','POST /api/fill/generate'],
-    'risk-calculator':      ['POST /api/risk/check','GET /api/var/calculate','POST /api/margin/validate'],
-    'market-data-feed':     ['GET /api/quote/latest','POST /api/feed/subscribe','GET /api/instrument/list'],
-    'settlement-processor': ['POST /api/settle/initiate','GET /api/settle/status','POST /api/netting/run'],
-    'fraud-detector':       ['POST /api/screen/transaction','GET /api/aml/status','POST /api/kyc/verify'],
-    'compliance-monitor':   ['POST /api/report/emir','GET /api/report/status','POST /api/audit/submit'],
-    'customer-portal':      ['GET /api/portfolio/view','POST /api/trade/confirm','GET /api/pnl/report'],
-    'audit-logger':         ['POST /api/event/log','GET /api/journal/read','POST /api/replicate/dr'],
-}
-# P99 latency baseline per service (ms) — matching financial scenario characteristics
-SVC_LATENCY_MS = {
-    'order-gateway': 25,        # high-speed order intake
-    'matching-engine': 8,       # ultra-low latency matching
-    'risk-calculator': 180,     # complex VAR/margin calculations
-    'market-data-feed': 15,     # near-realtime feed processing
-    'settlement-processor': 420, # T+2 settlement batch operations
-    'fraud-detector': 95,       # ML inference latency
-    'compliance-monitor': 310,  # regulatory report generation
-    'customer-portal': 145,     # web tier latency
-    'audit-logger': 35,         # async write latency
-}
-
-def make_es_log_docs(svcs, n_per_svc=3):
-    """Generate financial-platform telemetry docs for ES _bulk API.
-    Each doc includes log, trace, and RED metric fields for rich ES|QL queries."""
-    from datetime import datetime, timezone
-    instruments = ['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'JPM', 'GS', 'FX.EURUSD', 'FUT.ES', 'FUT.NQ']
-    order_types = ['market', 'limit', 'stop', 'stop_limit', 'iceberg']
-    docs = []
-    for svc in svcs:
-        msgs = LOG_MESSAGES.get(svc['name'], ['Processing request'])
-        base_ms = SVC_LATENCY_MS.get(svc['name'], 100)
-        txn_names = TRANSACTION_NAMES.get(svc['name'], ['GET /api/request'])
-        for _ in range(n_per_svc):
-            is_error = random.random() < 0.12
-            msg = random.choice(msgs[3:] if is_error and len(msgs) > 3 else msgs[:3])
-            # Latency: normal distribution around baseline, spikes on errors
-            duration_ms = max(5, int(random.gauss(base_ms * (4 if is_error else 1), base_ms * 0.3)))
-            http_status = random.choice([500, 503, 504]) if is_error else random.choice([200, 200, 200, 201, 202])
-            docs.append({
-                '@timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-                'service.name': svc['name'],
-                'cloud.provider': svc['cloud'],
-                'cloud.region': svc['region'],
-                'cloud.platform': f"{svc['cloud']}_{'ec2' if svc['cloud']=='aws' else 'compute_engine' if svc['cloud']=='gcp' else 'vm'}",
-                'deployment.environment': 'production',
-                'subsystem': svc.get('subsystem', 'trading'),
-                'severity_text': 'ERROR' if is_error else random.choice(['INFO','INFO','WARN']),
-                'body.text': msg,
-                'trace.id': _rand_id(32),
-                'span.id': _rand_id(16),
-                'transaction.id': _rand_id(16),
-                'transaction.name': random.choice(txn_names),
-                'transaction.duration.us': duration_ms * 1000,
-                'http.response.status_code': http_status,
-                'trade.id': f'TRD-{random.randint(1000000, 9999999)}',
-                'instrument': random.choice(instruments),
-                'order.type': random.choice(order_types),
-                'order.qty': random.randint(100, 50000),
-                'order.latency.us': max(10, int(random.gauss(base_ms * 1000, base_ms * 300))),
-            })
-    return docs
-
 def load_cfg():
     for _ in range(30):
         try:
@@ -1686,45 +1548,29 @@ def main():
     log.info('  OTLP endpoint: %s', otlp_url)
     log.info('  ES endpoint:   %s', es_url)
 
-    # Strategy 1: OTLP to APM endpoint
-    mode = None
-    auth_header = None
-    if otlp_url:
-        result = probe_otlp_auth(otlp_url, apm_key, api_key, basic_auth)
-        if result:
-            mode, auth_header = result
-
-    # Strategy 2: Write directly to ES data stream via _bulk
-    es_index = None
-    if not mode and es_url and api_key:
-        result = probe_es_direct(es_url, api_key)
-        if result:
-            auth_header, es_index = result
-            mode = 'es-direct'
-
-    if not mode:
-        log.error('No working write method found — giving up.')
+    # OTLP only — no ES _bulk / custom indices (OTel-native APM data streams only).
+    if not otlp_url:
+        log.error('OTLP endpoint missing in config — cannot send telemetry.')
         sys.exit(1)
+    result = probe_otlp_auth(otlp_url, apm_key, api_key, basic_auth)
+    if not result:
+        log.error('OTLP auth failed — check ingest URL and API key.')
+        sys.exit(1)
+    mode, auth_header = result
 
-    log.info('Using mode: %s  index: %s', mode, es_index or 'n/a')
+    log.info('Using OTLP mode only (logs, traces, metrics)')
     tick = 0
     while True:
         try:
-            if mode == 'otlp':
-                ok = send(otlp_url, auth_header, 'logs', make_logs(SERVICES, random.randint(2,5)))
-                if ok:
-                    log.info('[otlp] Sent logs for %d services (tick %d)', len(SERVICES), tick)
-                if tick % 2 == 0:
-                    ok = send(otlp_url, auth_header, 'traces', make_traces(SERVICES))
-                    if ok: log.info('[otlp] Sent traces ✓')
-                if tick % 6 == 0:
-                    ok = send(otlp_url, auth_header, 'metrics', make_metrics(SERVICES))
-                    if ok: log.info('[otlp] Sent metrics ✓')
-            else:  # es-direct
-                docs = make_es_log_docs(SERVICES, random.randint(2,5))
-                ok = es_bulk_write(es_url, auth_header, es_index, docs)
-                if ok:
-                    log.info('[es-direct→%s] Indexed %d docs (tick %d)', es_index, len(docs), tick)
+            ok = send(otlp_url, auth_header, 'logs', make_logs(SERVICES, random.randint(2,5)))
+            if ok:
+                log.info('[otlp] Sent logs for %d services (tick %d)', len(SERVICES), tick)
+            if tick % 2 == 0:
+                ok = send(otlp_url, auth_header, 'traces', make_traces(SERVICES))
+                if ok: log.info('[otlp] Sent traces ✓')
+            if tick % 6 == 0:
+                ok = send(otlp_url, auth_header, 'metrics', make_metrics(SERVICES))
+                if ok: log.info('[otlp] Sent metrics ✓')
         except Exception as e:
             log.error('Generator loop error: %s', e)
         tick += 1
@@ -1768,7 +1614,7 @@ journalctl -u paypal-otel-gen -f --no-pager
 EOF
   chmod +x /usr/local/bin/otel-logs
 else
-  echo "WARN: Skipping standalone OTLP generator — missing OTLP URL or API key."
+  echo "WARN: Skipping standalone OTLP generator — need ES_URL, API key, and DEMO_OTLP_URL."
 fi
 
 # ── Index Aliases for ES|QL convenience ──────────────────────────────────────
@@ -1831,7 +1677,7 @@ fi
 
 # ── ML Anomaly Detection Jobs ─────────────────────────────────────────────────
 # Create 3 ML jobs that detect anomalies in financial trading platform data.
-# Jobs run against paypal-otel-logs once data starts flowing.
+# Jobs run against OTLP log data streams once data starts flowing.
 if [[ -n "$ES_URL" && -n "$ELASTICSEARCH_API_KEY" ]]; then
   echo "Creating PayPal ML anomaly detection jobs..."
 
@@ -1884,9 +1730,9 @@ if [[ -n "$ES_URL" && -n "$ELASTICSEARCH_API_KEY" ]]; then
       "detectors": [{
         "function": "high_count",
         "detector_description": "Unusually high error log count",
-        "partition_field_name": "service.name"
+        "partition_field_name": "resource.attributes.service.name"
       }],
-      "influencers": ["service.name"]
+      "influencers": ["resource.attributes.service.name"]
     },
     "data_description": { "time_field": "@timestamp" },
     "analysis_limits": { "model_memory_limit": "20mb" },
@@ -1894,7 +1740,7 @@ if [[ -n "$ES_URL" && -n "$ELASTICSEARCH_API_KEY" ]]; then
   }' \
   "{
     \"job_id\": \"paypal-service-error-spike\",
-    \"indices\": [\"paypal-otel-logs\"],
+    \"indices\": [\"logs-apm.otel-*\"],
     \"query\": {\"term\": {\"severity_text\": {\"value\": \"ERROR\"}}},
     \"scroll_size\": 1000,
     \"frequency\": \"1m\",
@@ -1910,9 +1756,9 @@ if [[ -n "$ES_URL" && -n "$ELASTICSEARCH_API_KEY" ]]; then
       "detectors": [{
         "function": "count",
         "detector_description": "Unusual trade volume",
-        "partition_field_name": "service.name"
+        "partition_field_name": "resource.attributes.service.name"
       }],
-      "influencers": ["service.name"]
+      "influencers": ["resource.attributes.service.name"]
     },
     "data_description": { "time_field": "@timestamp" },
     "analysis_limits": { "model_memory_limit": "20mb" },
@@ -1920,7 +1766,7 @@ if [[ -n "$ES_URL" && -n "$ELASTICSEARCH_API_KEY" ]]; then
   }' \
   "{
     \"job_id\": \"paypal-trade-volume-anomaly\",
-    \"indices\": [\"paypal-otel-logs\"],
+    \"indices\": [\"logs-apm.otel-*\"],
     \"query\": {\"match_all\": {}},
     \"scroll_size\": 1000,
     \"frequency\": \"1m\",
@@ -1936,9 +1782,9 @@ if [[ -n "$ES_URL" && -n "$ELASTICSEARCH_API_KEY" ]]; then
       "detectors": [{
         "function": "high_count",
         "detector_description": "Error surge in trading pipeline",
-        "partition_field_name": "service.name"
+        "partition_field_name": "resource.attributes.service.name"
       }],
-      "influencers": ["service.name"]
+      "influencers": ["resource.attributes.service.name"]
     },
     "data_description": { "time_field": "@timestamp" },
     "analysis_limits": { "model_memory_limit": "20mb" },
@@ -1946,10 +1792,10 @@ if [[ -n "$ES_URL" && -n "$ELASTICSEARCH_API_KEY" ]]; then
   }' \
   "{
     \"job_id\": \"paypal-trading-pipeline-degradation\",
-    \"indices\": [\"paypal-otel-logs\"],
+    \"indices\": [\"logs-apm.otel-*\"],
     \"query\": {
       \"terms\": {
-        \"service.name\": [\"order-gateway\", \"matching-engine\", \"risk-calculator\", \"market-data-feed\"]
+        \"resource.attributes.service.name\": [\"order-gateway\", \"matching-engine\", \"risk-calculator\", \"market-data-feed\"]
       }
     },
     \"scroll_size\": 1000,
@@ -2091,8 +1937,8 @@ echo "  demo-deployments   — show running scenarios"
 echo "  demo-chaos         — show chaos channel status"
 echo "  demo-restart       — restart the demo app"
 
-# ── PayPal Alert Rules (query paypal-otel-logs) ───────────────────────────────
-# Create PayPal/Financial-specific alert rules that query paypal-otel-logs and fire
+# ── PayPal Alert Rules (query logs-apm.otel-*) ───────────────────────────────
+# Create PayPal/Financial-specific alert rules that query logs-apm.otel-* and fire
 # when the Chaos Controller injects trading/payment faults.
 if [[ -n "$KIBANA_URL" && -n "$BASE64" ]]; then
   echo "Creating PayPal alert rules..."
@@ -2133,10 +1979,10 @@ RULES = [
                 'equation': 'A',
             }],
             'searchConfiguration': {
-                'index': 'paypal-otel-logs',
+                'index': 'logs-apm.otel-*',
                 'query': {'query': '', 'language': 'kuery'},
             },
-            'groupBy': ['service.name'],
+            'groupBy': ['resource.attributes.service.name'],
             'alertOnNoData': False,
             'alertOnGroupDisappear': False,
         },
@@ -2151,19 +1997,19 @@ RULES = [
         'schedule': {'interval': '1m'},
         'params': {
             'criteria': [{
-                'comparator': '>', 'threshold': [500],
+                'comparator': '>', 'threshold': [2000000],
                 'timeSize': 5, 'timeUnit': 'm',
                 'metrics': [{
                     'name': 'A',
-                    'filter': 'service.name: "matching-engine" AND transaction.duration.us: *',
+                    'filter': 'resource.attributes.service.name: "matching-engine" AND transaction.duration.us: *',
                     'aggType': 'max',
                     'field': 'transaction.duration.us',
                 }],
-                'equation': 'A / 1000',
+                'equation': 'A',
             }],
             'searchConfiguration': {
-                'index': 'paypal-otel-logs',
-                'query': {'query': 'service.name: "matching-engine"', 'language': 'kuery'},
+                'index': 'traces-apm.otel-*',
+                'query': {'query': 'resource.attributes.service.name: "matching-engine"', 'language': 'kuery'},
             },
             'groupBy': [],
             'alertOnNoData': False,
@@ -2182,12 +2028,12 @@ RULES = [
             'criteria': [{
                 'comparator': '>', 'threshold': [5],
                 'timeSize': 5, 'timeUnit': 'm',
-                'metrics': [{'name': 'A', 'filter': 'severity_text: "ERROR" AND service.name: "order-gateway"', 'aggType': 'count'}],
+                'metrics': [{'name': 'A', 'filter': 'severity_text: "ERROR" AND resource.attributes.service.name: "order-gateway"', 'aggType': 'count'}],
                 'equation': 'A',
             }],
             'searchConfiguration': {
-                'index': 'paypal-otel-logs',
-                'query': {'query': 'service.name: "order-gateway"', 'language': 'kuery'},
+                'index': 'logs-apm.otel-*',
+                'query': {'query': 'resource.attributes.service.name: "order-gateway"', 'language': 'kuery'},
             },
             'groupBy': [],
             'alertOnNoData': False,
@@ -2206,12 +2052,12 @@ RULES = [
             'criteria': [{
                 'comparator': '>', 'threshold': [3],
                 'timeSize': 5, 'timeUnit': 'm',
-                'metrics': [{'name': 'A', 'filter': 'severity_text: "ERROR" AND service.name: "settlement-processor"', 'aggType': 'count'}],
+                'metrics': [{'name': 'A', 'filter': 'severity_text: "ERROR" AND resource.attributes.service.name: "settlement-processor"', 'aggType': 'count'}],
                 'equation': 'A',
             }],
             'searchConfiguration': {
-                'index': 'paypal-otel-logs',
-                'query': {'query': 'service.name: "settlement-processor"', 'language': 'kuery'},
+                'index': 'logs-apm.otel-*',
+                'query': {'query': 'resource.attributes.service.name: "settlement-processor"', 'language': 'kuery'},
             },
             'groupBy': [],
             'alertOnNoData': False,
@@ -2228,18 +2074,18 @@ RULES = [
         'schedule': {'interval': '1m'},
         'params': {
             'criteria': [{
-                'comparator': '>', 'threshold': [2000],
+                'comparator': '>', 'threshold': [2000000],
                 'timeSize': 5, 'timeUnit': 'm',
                 'metrics': [{
                     'name': 'A', 'aggType': 'max',
                     'field': 'transaction.duration.us',
-                    'filter': 'service.name: "risk-calculator"',
+                    'filter': 'resource.attributes.service.name: "risk-calculator" AND transaction.duration.us: *',
                 }],
-                'equation': 'A / 1000',
+                'equation': 'A',
             }],
             'searchConfiguration': {
-                'index': 'paypal-otel-logs',
-                'query': {'query': 'service.name: "risk-calculator"', 'language': 'kuery'},
+                'index': 'traces-apm.otel-*',
+                'query': {'query': 'resource.attributes.service.name: "risk-calculator"', 'language': 'kuery'},
             },
             'groupBy': [],
             'alertOnNoData': False,
@@ -2290,11 +2136,14 @@ DASHBOARD_ID  = "paypal-exec-dashboard"
 
 CLOUD_GROUPS = [
     {"label": "**AWS** us-east-1",   "x_start": 0,  "col_width": 15, "cluster": "paypal-aws-us-east-1",
-     "services": ["order-gateway", "matching-engine", "risk-calculator"]},
+     "services": ["order-gateway", "matching-engine", "risk-calculator"],
+     "events_kql": 'resource.attributes.cloud.provider: "aws" AND resource.attributes.cloud.region: "us-east-1"'},
     {"label": "**GCP** us-central1", "x_start": 16, "col_width": 16, "cluster": "paypal-gcp-us-central1",
-     "services": ["market-data-feed", "settlement-processor", "fraud-detector"]},
+     "services": ["market-data-feed", "settlement-processor", "fraud-detector"],
+     "events_kql": 'resource.attributes.cloud.provider: "gcp" AND resource.attributes.cloud.region: "us-central1"'},
     {"label": "**Azure** eastus",    "x_start": 33, "col_width": 15, "cluster": "paypal-azure-eastus",
-     "services": ["compliance-monitor", "customer-portal", "audit-logger"]},
+     "services": ["compliance-monitor", "customer-portal", "audit-logger"],
+     "events_kql": 'resource.attributes.cloud.provider: "azure" AND resource.attributes.cloud.region: "eastus"'},
 ]
 
 ERROR_TYPES = [
@@ -2471,7 +2320,7 @@ for group in CLOUD_GROUPS:
     panels.append(make_panel(pid, {"h": 6, "i": pid, "w": right_w, "x": x_base + left_w, "y": 8},
         "Node Memory", "lnsMetric", state, [make_ref(DATA_VIEW_ID_METRICS, lid)]))
 
-# Section 2: RED Metrics (y=14..34)
+# Section 2: RED Metrics (y=14..34) — OTel spans in traces-apm.*
 panels.append({"type": "DASHBOARD_MARKDOWN",
     "embeddableConfig": {"content": "**RED Metrics** Rate \u00b7 Errors \u00b7 Duration"},
     "panelIndex": "p_red_label", "gridData": {"h": 2, "i": "p_red_label", "w": 48, "x": 0, "y": 14}})
@@ -2524,7 +2373,7 @@ state = make_state(make_layer(lid, [cx, cs, cy], cols, DATA_VIEW_ID_TRACES),
 panels.append(make_panel("p35", {"h": 12, "i": "p35", "w": 24, "x": 24, "y": 22},
     "Error Rate by Service", "lnsXY", state, [make_ref(DATA_VIEW_ID_TRACES, lid)]))
 
-# Section 3: USE Metrics (y=34..54)
+# Section 3: USE Metrics (y=34..54) — OTLP metrics streams
 panels.append({"type": "DASHBOARD_MARKDOWN",
     "embeddableConfig": {"content": "**USE Metrics** Utilization \u00b7 Saturation \u00b7 Errors"},
     "panelIndex": "p_use_label", "gridData": {"h": 2, "i": "p_use_label", "w": 48, "x": 0, "y": 34}})
@@ -2610,7 +2459,7 @@ state = make_state(make_layer(lid, [cx, cy], cols, DATA_VIEW_ID_LOGS),
      "layers": [{"layerId": lid, "layerType": "data", "seriesType": "area_stacked",
                  "accessors": [cy], "xAccessor": cx}]})
 panels.append(make_panel("p15", {"h": 12, "i": "p15", "w": 24, "x": 24, "y": 62},
-    "Log Volume Over Time", "lnsXY", state, [make_ref(DATA_VIEW_ID_LOGS, lid)]))
+    "OTel log volume", "lnsXY", state, [make_ref(DATA_VIEW_ID_LOGS, lid)]))
 
 lid = uid(); cx = uid(); cy = uid()
 cols = {cx: col_date_histogram("30s"), cy: col_count(label="Requests")}
@@ -2695,9 +2544,9 @@ panels.append({"type": "DASHBOARD_MARKDOWN",
 kql_parts  = " OR ".join(f'body.text: \\"{et}\\"' for et in ERROR_TYPES)
 esql_where = f'severity_text == "ERROR" AND KQL("{kql_parts}")'
 esql_query = (
-    f'FROM logs.otel,logs.otel.* '
+    f'FROM logs.otel, logs.otel.* '
     f'| WHERE {esql_where} '
-    f'| KEEP body.text, trace.id, span.id, service.name, @timestamp '
+    f'| KEEP body.text, trace.id, span.id, resource.attributes.service.name, @timestamp '
     f'| SORT @timestamp DESC | LIMIT 50'
 )
 lid_es = uid(); adhoc_id = uid()
@@ -2710,7 +2559,7 @@ esql_cols = [
     _esql_col("body.text",    "text",    "string"),
     _esql_col("trace.id",     "keyword", "string"),
     _esql_col("span.id",      "keyword", "string"),
-    _esql_col("service.name", "keyword", "string"),
+    _esql_col("resource.attributes.service.name", "keyword", "string"),
     _esql_col("@timestamp",   "date",    "date"),
 ]
 esql_state = {
@@ -2744,7 +2593,7 @@ dashboard = {
         "kibanaSavedObjectMeta": {"searchSourceJSON": json.dumps({"query": {"language": "kuery", "query": ""}, "filter": []})},
         "panelsJSON": json.dumps(panels),
         "refreshInterval": {"pause": False, "value": 10000},
-        "timeFrom": "now-2m", "timeRestore": True, "timeTo": "now",
+        "timeFrom": "now-30m", "timeRestore": True, "timeTo": "now",
         "title": f"{SCENARIO_NAME} Executive Dashboard",
     },
     "coreMigrationVersion": "8.8.0", "id": DASHBOARD_ID,
@@ -2778,7 +2627,7 @@ fi
 # Creates an Elastic Workflow that idempotently manages SLOs for all PayPal
 # services. The workflow runs every 24h (and manually), deletes any existing
 # Availability/Latency/Error Rate SLOs, then creates 3 grouped SLOs that
-# automatically produce per-service instances via groupBy: service.name.
+# automatically produce per-service instances via groupBy: resource.attributes.service.name.
 # After creating the workflow, we trigger it immediately to populate SLOs.
 if [[ -n "$KIBANA_URL" && -n "$BASE64" ]]; then
   echo "Creating PayPal SLO Management Workflow..."
@@ -2804,11 +2653,27 @@ def kbn(method, path, body=None):
     except Exception as ex:
         return 0, str(ex)
 
+def first_workflow_id(resp):
+    if not isinstance(resp, dict):
+        return ''
+    if resp.get('id'):
+        return str(resp['id'])
+    for key in ('workflows', 'results', 'items', 'created', 'data'):
+        arr = resp.get(key)
+        if not isinstance(arr, list) or not arr:
+            continue
+        first = arr[0]
+        if isinstance(first, dict):
+            if first.get('id'):
+                return str(first['id'])
+            nested = first.get('workflow')
+            if isinstance(nested, dict) and nested.get('id'):
+                return str(nested['id'])
+    return ''
+
 # ── Workflow definition ───────────────────────────────────────────────────────
-# Adapted from user-supplied template:
-# - index updated to paypal-otel-logs (our actual data index)
-# - filters updated to match ECS fields we generate
-# - groupBy: service.name creates per-service SLO instances automatically
+# SLOs target OTLP APM data streams only (logs-apm.otel-*, traces-apm.otel-*).
+# resource.attributes.service.name is the OpenTelemetry service.name resource attribute as stored by ingest.
 workflow = {
     'name': 'SLO Management and Service Evaluation Workflow',
     'enabled': True,
@@ -2816,7 +2681,7 @@ workflow = {
         'Automatically evaluates all 9 financial platform services and creates SLOs. '
         'Runs every 24 hours. IDEMPOTENT: Deletes all existing SLOs matching '
         'Availability/Latency/Error Rate names, then creates 3 standard grouped SLOs. '
-        'groupBy: service.name produces one SLO per service: order-gateway, matching-engine, '
+        'groupBy: resource.attributes.service.name produces one SLO per service: order-gateway, matching-engine, '
         'risk-calculator, market-data-feed, settlement-processor, fraud-detector, '
         'compliance-monitor, customer-portal, audit-logger. '
         'SLO Targets: Availability 95%, Error Rate 95%, Latency 85% under 2s.'
@@ -2836,7 +2701,7 @@ workflow = {
                 'Execution ID: {{ execution.id }}\n'
                 'Timestamp: {{ now | date: \'%Y-%m-%d %H:%M:%S UTC\' }}\n\n'
                 'IDEMPOTENT: Deletes existing SLOs, then creates 3 grouped SLOs\n'
-                'that auto-expand to per-service instances via groupBy: service.name\n'
+                'that auto-expand to per-service instances via groupBy: resource.attributes.service.name\n'
                 '================================================'
             )},
         },
@@ -2896,18 +2761,18 @@ workflow = {
                 'path': '/api/observability/slos',
                 'body': {
                     'name': 'Availability SLO',
-                    'description': 'PayPal service availability — 95% of requests succeed (HTTP < 500). Grouped by service.name, producing one instance per PayPal microservice.',
+                    'description': 'OTel logs — 95% of records are not ERROR (OpenTelemetry severity). Grouped by resource.attributes.service.name.',
                     'indicator': {
                         'type': 'sli.kql.custom',
                         'params': {
-                            'index': 'paypal-otel-logs',
+                            'index': 'logs-apm.otel-*',
                             'timestampField': '@timestamp',
-                            'filter': 'service.name: *',
-                            'good': 'http.response.status_code < 500',
-                            'total': 'service.name: *',
+                            'filter': 'resource.attributes.service.name: *',
+                            'good': 'NOT severity_text: ERROR',
+                            'total': 'resource.attributes.service.name: *',
                         },
                     },
-                    'groupBy': ['service.name'],
+                    'groupBy': ['resource.attributes.service.name'],
                     'budgetingMethod': 'occurrences',
                     'timeWindow': {'duration': '7d', 'type': 'rolling'},
                     'objective': {'target': 0.95},
@@ -2924,18 +2789,18 @@ workflow = {
                 'path': '/api/observability/slos',
                 'body': {
                     'name': 'Latency SLO',
-                    'description': 'PayPal service latency — 85% of requests complete in under 2s. Grouped by service.name. CAL DURATION_MS equivalent.',
+                    'description': 'OTel traces — 85% of transactions under 2s (transaction.duration.us, μs). Grouped by resource.attributes.service.name.',
                     'indicator': {
                         'type': 'sli.kql.custom',
                         'params': {
-                            'index': 'paypal-otel-logs',
+                            'index': 'traces-apm.otel-*',
                             'timestampField': '@timestamp',
                             'filter': 'transaction.duration.us: *',
                             'good': 'transaction.duration.us <= 2000000',
                             'total': 'transaction.duration.us: *',
                         },
                     },
-                    'groupBy': ['service.name'],
+                    'groupBy': ['resource.attributes.service.name'],
                     'budgetingMethod': 'occurrences',
                     'timeWindow': {'duration': '7d', 'type': 'rolling'},
                     'objective': {'target': 0.85},
@@ -2952,18 +2817,18 @@ workflow = {
                 'path': '/api/observability/slos',
                 'body': {
                     'name': 'Error Rate SLO',
-                    'description': 'PayPal service error rate — less than 5% of requests fail. Grouped by service.name.',
+                    'description': 'OTel traces — 95% of spans are not Error status (OpenTelemetry span status). Grouped by resource.attributes.service.name.',
                     'indicator': {
                         'type': 'sli.kql.custom',
                         'params': {
-                            'index': 'paypal-otel-logs',
+                            'index': 'traces-apm.otel-*',
                             'timestampField': '@timestamp',
-                            'filter': 'service.name: *',
-                            'good': 'NOT severity_text: ERROR',
-                            'total': 'service.name: *',
+                            'filter': 'resource.attributes.service.name: *',
+                            'good': 'not status.code: Error',
+                            'total': 'resource.attributes.service.name: *',
                         },
                     },
-                    'groupBy': ['service.name'],
+                    'groupBy': ['resource.attributes.service.name'],
                     'budgetingMethod': 'occurrences',
                     'timeWindow': {'duration': '7d', 'type': 'rolling'},
                     'objective': {'target': 0.95},
@@ -2975,10 +2840,18 @@ workflow = {
     ],
 }
 
-# ── Create the workflow ───────────────────────────────────────────────────────
-status, resp = kbn('POST', '/api/workflows', workflow)
+# ── Create the workflow (bulk API requires { "workflows": [ ... ] }) ─────────
+status, resp = kbn('POST', '/api/workflows', {'workflows': [workflow]})
 if status in (200, 201):
-    wf_id = resp.get('id', '') if isinstance(resp, dict) else ''
+    wf_id = first_workflow_id(resp) if isinstance(resp, dict) else ''
+    if not wf_id and isinstance(resp, dict):
+        time.sleep(1)
+        _, ls = kbn('GET', '/api/workflows?perPage=100')
+        if isinstance(ls, dict):
+            for wf in ls.get('results', ls.get('items', [])):
+                if 'SLO Management' in wf.get('name', ''):
+                    wf_id = str(wf.get('id', ''))
+                    break
     print(f'Workflow created ✓  id={wf_id}')
 
     # Trigger it immediately so SLOs are created right now
@@ -3003,27 +2876,27 @@ else:
     print('Falling back to direct SLO creation...')
     for slo in [
         {'name': 'Availability SLO',
-         'description': 'PayPal service availability — 95% of requests succeed (HTTP < 500)',
+         'description': 'OTel logs — 95% non-ERROR severity',
          'indicator': {'type': 'sli.kql.custom', 'params': {
-             'index': 'paypal-otel-logs', 'timestampField': '@timestamp',
-             'filter': 'service.name: *', 'good': 'http.response.status_code < 500', 'total': 'service.name: *'}},
-         'groupBy': ['service.name'], 'budgetingMethod': 'occurrences',
+             'index': 'logs-apm.otel-*', 'timestampField': '@timestamp',
+             'filter': 'resource.attributes.service.name: *', 'good': 'NOT severity_text: ERROR', 'total': 'resource.attributes.service.name: *'}},
+         'groupBy': ['resource.attributes.service.name'], 'budgetingMethod': 'occurrences',
          'timeWindow': {'duration': '7d', 'type': 'rolling'}, 'objective': {'target': 0.95},
          'tags': ['paypal', 'availability']},
         {'name': 'Latency SLO',
-         'description': 'PayPal service latency — 85% of requests under 2s',
+         'description': 'OTel traces — 85% under 2s (transaction.duration.us)',
          'indicator': {'type': 'sli.kql.custom', 'params': {
-             'index': 'paypal-otel-logs', 'timestampField': '@timestamp',
+             'index': 'traces-apm.otel-*', 'timestampField': '@timestamp',
              'filter': 'transaction.duration.us: *', 'good': 'transaction.duration.us <= 2000000', 'total': 'transaction.duration.us: *'}},
-         'groupBy': ['service.name'], 'budgetingMethod': 'occurrences',
+         'groupBy': ['resource.attributes.service.name'], 'budgetingMethod': 'occurrences',
          'timeWindow': {'duration': '7d', 'type': 'rolling'}, 'objective': {'target': 0.85},
          'tags': ['paypal', 'latency']},
         {'name': 'Error Rate SLO',
-         'description': 'PayPal service error rate — less than 5% errors',
+         'description': 'OTel traces — 95% spans not Error',
          'indicator': {'type': 'sli.kql.custom', 'params': {
-             'index': 'paypal-otel-logs', 'timestampField': '@timestamp',
-             'filter': 'service.name: *', 'good': 'NOT severity_text: ERROR', 'total': 'service.name: *'}},
-         'groupBy': ['service.name'], 'budgetingMethod': 'occurrences',
+             'index': 'traces-apm.otel-*', 'timestampField': '@timestamp',
+             'filter': 'resource.attributes.service.name: *', 'good': 'not status.code: Error', 'total': 'resource.attributes.service.name: *'}},
+         'groupBy': ['resource.attributes.service.name'], 'budgetingMethod': 'occurrences',
          'timeWindow': {'duration': '7d', 'type': 'rolling'}, 'objective': {'target': 0.95},
          'tags': ['paypal', 'error-rate']},
     ]:
@@ -3034,6 +2907,317 @@ SLO_WF_EOF
   echo "SLO Management Workflow done ✓"
 else
   echo "WARN: Skipping SLO workflow — KIBANA_URL or BASE64 not set"
+fi
+
+# ── Issue scan & remediation playbooks workflow ───────────────────────────────
+# Keeps parity with workflows/issue-scan-and-playbooks.workflow.yaml (OTLP APM indices).
+# Creates on provision so learners do not rely on a manual import of paypal-otel-logs YAML.
+if [[ -n "$KIBANA_URL" && -n "$BASE64" ]]; then
+  echo "Creating Issue scan & remediation playbooks workflow..."
+
+  python3 - <<ISSUE_SCAN_WF_EOF
+import json, urllib.request, urllib.error, ssl, time
+
+KIBANA = '${KIBANA_URL}'
+AUTH   = 'Basic ${BASE64}'
+CTX    = ssl.create_default_context()
+
+def kbn(method, path, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req  = urllib.request.Request(
+        f'{KIBANA}{path}', data=data, method=method,
+        headers={'Authorization': AUTH, 'kbn-xsrf': 'true',
+                 'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, context=CTX, timeout=60) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read().decode('utf-8', 'replace'))
+        except Exception:
+            return e.code, e.read().decode('utf-8', 'replace')
+    except Exception as ex:
+        return 0, str(ex)
+
+def first_workflow_id(resp):
+    if not isinstance(resp, dict):
+        return ''
+    if resp.get('id'):
+        return str(resp['id'])
+    for key in ('workflows', 'results', 'items', 'created', 'data'):
+        arr = resp.get(key)
+        if not isinstance(arr, list) or not arr:
+            continue
+        first = arr[0]
+        if isinstance(first, dict):
+            if first.get('id'):
+                return str(first['id'])
+            nested = first.get('workflow')
+            if isinstance(nested, dict) and nested.get('id'):
+                return str(nested['id'])
+    return ''
+
+# Sync with workflows/issue-scan-and-playbooks.workflow.yaml
+issue_scan = {
+    'name': 'Issue scan & remediation playbooks',
+    'enabled': True,
+    'description': (
+        'Scans the last hour for ERROR logs (by service) and slow trace spans, then prints '
+        'concrete investigation and mitigation steps. OTLP targets: logs-apm.otel-*, traces-apm.otel-*.'
+    ),
+    'triggers': [
+        {'type': 'manual'},
+        {'type': 'scheduled', 'with': {'every': '6h'}},
+    ],
+    'steps': [
+        {
+            'name': 'start_banner',
+            'type': 'console',
+            'with': {
+                'message': (
+                    '============================================================\n'
+                    'Issue scan — execution {{ execution.id }}\n'
+                    "Started: {{ now | date: '%Y-%m-%d %H:%M:%S UTC' }}\n"
+                    'Window: last 1 hour (adjust body in workflow if needed)\n'
+                    '============================================================\n'
+                ),
+            },
+        },
+        {
+            'name': 'errors_by_service',
+            'type': 'elasticsearch.request',
+            'with': {
+                'method': 'POST',
+                'path': '/logs-apm.otel-*/_search',
+                'body': {
+                    'size': 0,
+                    'track_total_hits': True,
+                    'query': {
+                        'bool': {
+                            'filter': [
+                                {'range': {'@timestamp': {'gte': 'now-1h'}}},
+                                {'term': {'severity_text': 'ERROR'}},
+                            ],
+                        },
+                    },
+                    'aggs': {
+                        'by_service': {
+                            'terms': {
+                                'field': 'resource.attributes.service.name',
+                                'size': 20,
+                                'order': {'_count': 'desc'},
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        {
+            'name': 'slow_transactions',
+            'type': 'elasticsearch.request',
+            'with': {
+                'method': 'POST',
+                'path': '/traces-apm.otel-*/_search',
+                'body': {
+                    'size': 0,
+                    'track_total_hits': True,
+                    'query': {
+                        'bool': {
+                            'filter': [
+                                {'range': {'@timestamp': {'gte': 'now-1h'}}},
+                                {'range': {'transaction.duration.us': {'gt': 2000000}}},
+                            ],
+                        },
+                    },
+                    'aggs': {
+                        'slow_by_service': {
+                            'terms': {
+                                'field': 'resource.attributes.service.name',
+                                'size': 15,
+                                'order': {'_count': 'desc'},
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        {
+            'name': 'sample_error_messages',
+            'type': 'elasticsearch.request',
+            'with': {
+                'method': 'POST',
+                'path': '/logs-apm.otel-*/_search',
+                'body': {
+                    'size': 5,
+                    'sort': [{'@timestamp': 'desc'}],
+                    'query': {
+                        'bool': {
+                            'filter': [
+                                {'range': {'@timestamp': {'gte': 'now-1h'}}},
+                                {'term': {'severity_text': 'ERROR'}},
+                            ],
+                        },
+                    },
+                    '_source': {
+                        'includes': [
+                            '@timestamp',
+                            'resource.attributes.service.name',
+                            'body.text',
+                            'trace.id',
+                        ],
+                    },
+                },
+            },
+        },
+        {
+            'name': 'branch_errors_present',
+            'type': 'if',
+            'condition': 'steps.errors_by_service.output.hits.total.value > 0',
+            'steps': [
+                {
+                    'name': 'playbook_error_spike',
+                    'type': 'console',
+                    'with': {
+                        'message': (
+                            '--- SIGNAL: ERROR traffic (last 1h) ---\n'
+                            'Total matching ERROR documents: {{ steps.errors_by_service.output.hits.total.value }}\n'
+                            '\n'
+                            'Recommended next steps:\n'
+                            '1) ES|QL — error mix by service:\n'
+                            '   FROM logs.otel\n'
+                            '   | WHERE @timestamp > now() - 1 hour AND severity_text == "ERROR"\n'
+                            '   | STATS c = COUNT(*) BY resource.attributes.service.name\n'
+                            '   | SORT c DESC\n'
+                            '\n'
+                            '2) ES|QL — sample messages + trace correlation:\n'
+                            '   FROM logs.otel\n'
+                            '   | WHERE @timestamp > now() - 1 hour AND severity_text == "ERROR"\n'
+                            '   | KEEP @timestamp, resource.attributes.service.name, body.text, trace.id\n'
+                            '   | SORT @timestamp DESC\n'
+                            '   | LIMIT 50\n'
+                            '\n'
+                            '3) Observability: open Services view for the noisiest resource.attributes.service.name; check deployments\n'
+                            '   and upstream dependencies for the same trace.id.\n'
+                            '\n'
+                            '4) If pattern is new — create/update alert + on-call runbook; if recurring — open\n'
+                            '   SLO / error-budget view for that service.\n'
+                            '\n'
+                            '5) Optional: enable or tune Elastic Streams on this data stream so statistically\n'
+                            '   unusual log bursts surface as Significant Events before dashboards are checked.\n'
+                        ),
+                    },
+                },
+            ],
+            'else': [
+                {
+                    'name': 'playbook_no_errors',
+                    'type': 'console',
+                    'with': {
+                        'message': (
+                            'No ERROR documents in logs-apm.otel-* for the last 1h (by current query).\n'
+                            'Still check latency, saturation, and business KPIs — errors are not the only signal.\n'
+                        ),
+                    },
+                },
+            ],
+        },
+        {
+            'name': 'branch_slow_present',
+            'type': 'if',
+            'condition': 'steps.slow_transactions.output.hits.total.value > 0',
+            'steps': [
+                {
+                    'name': 'playbook_latency',
+                    'type': 'console',
+                    'with': {
+                        'message': (
+                            '--- SIGNAL: slow spans (> 2s) ---\n'
+                            'Total slow spans: {{ steps.slow_transactions.output.hits.total.value }}\n'
+                            '\n'
+                            'Recommended next steps:\n'
+                            '1) ES|QL — slow span scan:\n'
+                            '   FROM traces.otel\n'
+                            '   | WHERE @timestamp > now() - 1 hour AND transaction.duration.us > 2000000\n'
+                            '   | STATS n = COUNT(*), slow_ms = MAX(transaction.duration.us) / 1000000 BY resource.attributes.service.name\n'
+                            '   | SORT slow_ms DESC\n'
+                            '\n'
+                            '2) Correlate with traces for the worst resource.attributes.service.name; inspect downstream spans.\n'
+                            '\n'
+                            '3) Check feature flags / recent releases for that service; scale or throttle if\n'
+                            '   dependency latency increased.\n'
+                        ),
+                    },
+                },
+            ],
+            'else': [
+                {
+                    'name': 'playbook_no_slow',
+                    'type': 'console',
+                    'with': {
+                        'message': (
+                            'No spans > 2s recorded in traces-apm.otel-* for the last 1h (by transaction.duration.us).\n'
+                            'If users still report slowness, verify OTLP traces include duration and service resource attributes.\n'
+                        ),
+                    },
+                },
+            ],
+        },
+        {
+            'name': 'dump_recent_error_samples',
+            'type': 'foreach',
+            'foreach': '{{ steps.sample_error_messages.output.hits.hits }}',
+            'steps': [
+                {
+                    'name': 'line_sample',
+                    'type': 'console',
+                    'with': {
+                        'message': (
+                            "SAMPLE ERROR | {{ foreach.item._source['@timestamp'] }} | "
+                            "svc={{ foreach.item._source['resource.attributes.service.name'] }} | "
+                            "trace={{ foreach.item._source['trace.id'] }} | "
+                            "{{ foreach.item._source['body.text'] }}"
+                        ),
+                    },
+                },
+            ],
+        },
+        {
+            'name': 'end_banner',
+            'type': 'console',
+            'with': {
+                'message': (
+                    '============================================================\n'
+                    'Scan complete. Use the playbooks above as a checklist; wire this workflow to\n'
+                    'Alerts (Connectors → Workflows) or Agent Builder tools for interactive RCA.\n'
+                    '============================================================\n'
+                ),
+            },
+        },
+    ],
+}
+
+status, resp = kbn('POST', '/api/workflows', {'workflows': [issue_scan]})
+if status in (200, 201):
+    wf_id = first_workflow_id(resp) if isinstance(resp, dict) else ''
+    if not wf_id and isinstance(resp, dict):
+        time.sleep(1)
+        _, ls = kbn('GET', '/api/workflows?perPage=100')
+        if isinstance(ls, dict):
+            for wf in ls.get('results', ls.get('items', [])):
+                if wf.get('name') == 'Issue scan & remediation playbooks':
+                    wf_id = str(wf.get('id', ''))
+                    break
+    print(f'  Issue scan workflow created ✓ id={wf_id}')
+elif status == 409:
+    print('  Issue scan workflow already exists (409) — skipped')
+else:
+    err = resp if isinstance(resp, str) else json.dumps(resp)[:400]
+    print(f'  WARN: Issue scan workflow HTTP {status}: {err}')
+ISSUE_SCAN_WF_EOF
+
+  echo "Issue scan workflow done ✓"
+else
+  echo "WARN: Skipping Issue scan workflow — KIBANA_URL or BASE64 not set"
 fi
 
 echo "Track setup complete — PayPal Merchant Observability environment ready."

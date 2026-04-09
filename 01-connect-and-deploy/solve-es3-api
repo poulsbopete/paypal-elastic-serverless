@@ -31,19 +31,19 @@ d = json.load(open('/tmp/project_results.json'))
 print(next(iter(d.values()))['credentials']['api_key'])
 " 2>/dev/null) || fail "Cannot read API key from /tmp/project_results.json"
 
-log "Waiting for telemetry to flow into paypal-otel-logs..."
+log "Waiting for telemetry to flow into logs-apm.otel-*..."
 for i in $(seq 1 30); do
-  DOC_COUNT=$(curl -sf "${ES_URL}/paypal-otel-logs/_count" \
+  DOC_COUNT=$(curl -sf "${ES_URL}/logs-apm.otel-*/_count" \
     -H "Authorization: ApiKey ${API_KEY}" 2>/dev/null \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('count',0))" 2>/dev/null || echo "0")
 
   if [[ "$DOC_COUNT" -ge 10 ]]; then
-    log "Data flowing: $DOC_COUNT documents in paypal-otel-logs ✓"
+    log "Data flowing: $DOC_COUNT documents in logs-apm.otel-* ✓"
     break
   fi
 
   if [[ $i -eq 30 ]]; then
-    fail "No data in paypal-otel-logs after 60s. Check: journalctl -u paypal-otel-gen --no-pager -n 20"
+    fail "No data in logs-apm.otel-* after 60s. Check: journalctl -u paypal-otel-gen --no-pager -n 20"
   fi
   sleep 2
 done

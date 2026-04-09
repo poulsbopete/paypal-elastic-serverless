@@ -15,10 +15,10 @@ API_KEY=$(python3 -c "import json; d=json.load(open('/tmp/project_results.json')
 
 log "Waiting for 50+ documents..."
 for i in $(seq 1 30); do
-  COUNT=$(curl -sf "${ES_URL}/paypal-otel-logs/_count" -H "Authorization: ApiKey ${API_KEY}" 2>/dev/null \
+  COUNT=$(curl -sf "${ES_URL}/logs-apm.otel-*/_count" -H "Authorization: ApiKey ${API_KEY}" 2>/dev/null \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('count',0))" 2>/dev/null || echo "0")
   if [[ "$COUNT" -ge 50 ]]; then
-    log "Data confirmed: $COUNT documents in paypal-otel-logs ✓"
+    log "Data confirmed: $COUNT documents in logs-apm.otel-* ✓"
     break
   fi
   sleep 2
