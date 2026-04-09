@@ -1,67 +1,50 @@
 #!/usr/bin/env bash
-# Challenge 1 check: verify the financial scenario generator is running and telemetry is flowing.
+# Challenge 1 check: verify a scenario has been successfully deployed.
 set -euo pipefail
 
 fail() { echo "❌ $*"; exit 1; }
 pass() { echo "✅ $*"; }
 
-# ── 1. Demo app is healthy ────────────────────────────────────────────────────
-if ! curl -sf "http://localhost:8090/health" >/dev/null 2>&1; then
-  fail "Demo app is not responding. Check: journalctl -u elastic-demo --no-pager -n 20"
+APP="http://localhost:8090"
+
+# ── 1. App is healthy ─────────────────────────────────────────────────────────
+if ! curl -sf "${APP}/health" >/dev/null 2>&1; then
+  fail "Demo app is not responding on port 8090. Check: journalctl -u elastic-demo"
 fi
 pass "Demo app is healthy"
 
-# ── 2. PayPal telemetry generator is running ──────────────────────────────────
-if ! systemctl is-active --quiet paypal-otel-gen 2>/dev/null; then
-  fail "PayPal telemetry generator is not running. Check: journalctl -u paypal-otel-gen --no-pager -n 20"
-fi
-pass "PayPal telemetry generator is active"
+# ── 2. At least one active deployment exists ──────────────────────────────────
+DEPLOYMENTS="$(curl -sf "${APP}/api/deployments" 2>/dev/null || echo "[]")"
 
-# ── 3. Data is flowing to Elasticsearch ──────────────────────────────────────
-ES_URL=$(python3 -c "
-import json
-try:
-    d = json.load(open('/tmp/project_results.json'))
-    print(next(iter(d.values()))['endpoints']['elasticsearch'])
-except Exception:
-    print('')
-" 2>/dev/null || echo "")
-
-API_KEY=$(python3 -c "
-import json
-try:
-    d = json.load(open('/tmp/project_results.json'))
-    print(next(iter(d.values()))['credentials']['api_key'])
-except Exception:
-    print('')
-" 2>/dev/null || echo "")
-
-if [[ -z "$ES_URL" || -z "$API_KEY" ]]; then
-  fail "Cannot read Elasticsearch credentials from /tmp/project_results.json"
+if ! command -v jq >/dev/null 2>&1; then
+  apt-get -yqq install --no-install-recommends jq >/dev/null 2>&1
 fi
 
-DOC_COUNT=$(curl -sf "${ES_URL}/logs-apm.otel-*/_count" \
-  -H "Authorization: ApiKey ${API_KEY}" 2>/dev/null \
-  | python3 -c "import sys,json; print(json.load(sys.stdin).get('count',0))" 2>/dev/null || echo "0")
+COUNT="$(echo "$DEPLOYMENTS" | jq 'length' 2>/dev/null || echo "0")"
 
-if [[ "$DOC_COUNT" -lt 10 ]]; then
-  fail "Only $DOC_COUNT documents in logs-apm.otel-* — telemetry is not yet flowing. Wait 30 seconds and try again. Check: journalctl -u paypal-otel-gen --no-pager -n 10"
+if [[ "$COUNT" -lt 1 ]]; then
+  fail "No active deployments found. Open the Demo App tab, enter your Elastic credentials, choose a scenario, and click Launch."
 fi
-pass "Telemetry is flowing: $DOC_COUNT documents in logs-apm.otel-* ✓"
+pass "Found $COUNT active deployment(s)"
 
-# ── 4. All 9 financial services are represented ───────────────────────────────
-SVC_COUNT=$(curl -sf "${ES_URL}/logs-apm.otel-*/_search" \
-  -H "Authorization: ApiKey ${API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d '{"size":0,"aggs":{"svcs":{"terms":{"field":"resource.attributes.service.name","size":20}}}}' 2>/dev/null \
-  | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('aggregations',{}).get('svcs',{}).get('buckets',[])))" 2>/dev/null || echo "0")
+# ── 3. The deployment is running (not stopped/errored) ────────────────────────
+RUNNING="$(echo "$DEPLOYMENTS" | jq '[.[] | select(.running == true)] | length' 2>/dev/null || echo "0")"
 
-if [[ "$SVC_COUNT" -lt 9 ]]; then
-  pass "Partial: $SVC_COUNT/9 financial services seen so far (more data is flowing in)"
-else
-  pass "All 9 financial platform services are sending telemetry ✓"
+if [[ "$RUNNING" -lt 1 ]]; then
+  fail "Deployment exists but is not running. Return to the Demo App and check the deployment status."
 fi
+pass "Deployment is active and sending telemetry"
+
+# ── 4. Kibana URL is configured (proxy test to ES) ───────────────────────────
+KIBANA_URL="$(echo "$DEPLOYMENTS" | jq -r '.[0].kibana_url // ""' 2>/dev/null || echo "")"
+
+if [[ -z "$KIBANA_URL" ]]; then
+  fail "Deployment has no Kibana URL — the launch may not have completed. Wait a moment and try again."
+fi
+pass "Kibana URL configured: ${KIBANA_URL}"
 
 echo ""
-echo "🎉 Telemetry is flowing! Open the Elastic Serverless tab and run ES|QL queries to explore the financial platform data."
+echo "🎉 Deployment confirmed! Your scenario is running and sending telemetry to Elastic."
+echo "   Open Kibana at: ${KIBANA_URL}"
+echo "   Then proceed to the next challenge to explore live telemetry."
 exit 0

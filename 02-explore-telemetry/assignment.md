@@ -51,153 +51,187 @@ timelimit: 1200
 enhanced_loading: null
 ---
 
-# Challenge 2 — Explore Financial Platform Telemetry
+# Explore Live OpenTelemetry Telemetry
 
-## The Story
-
-The PayPal Operations Center is live. 9 financial platform services are emitting telemetry: order-gateway and matching-engine handling trades on AWS, fraud-detector and settlement-processor processing on GCP, and compliance-monitor and audit-logger running on Azure.
-
-Your task: explore the data using ES|QL and understand the platform's health.
+Now that your scenario is running, let's explore the data flowing into Elastic. Open the **Elastic Serverless** tab.
 
 ---
 
-## Step 1 — Order Flow Analysis
+## What's Generating Telemetry
 
-In **Elastic Serverless → Analytics → Discover**, switch to ES|QL mode and run:
+The platform runs several background generators simultaneously:
 
-**Order volume by service and subsystem:**
-```esql
-FROM logs.otel
-| STATS trades = COUNT(*) BY resource.attributes.service.name, attributes.subsystem
-| SORT trades DESC
-```
-
-**Distributed trace reconstruction — follow an order through the system (spans):**
-```esql
-FROM traces.otel
-| WHERE transaction.name LIKE "*order*" OR span.name LIKE "*order*"
-| STATS span_count = COUNT(*), avg_latency_ms = AVG(transaction.duration.us) / 1000 BY resource.attributes.service.name, transaction.name
-| SORT avg_latency_ms DESC
-```
-
-**Order gateway throughput over time:**
-```esql
-FROM logs.otel
-| WHERE resource.attributes.service.name == "order-gateway"
-| STATS orders = COUNT(*) BY bucket = DATE_TRUNC(1 minute, @timestamp)
-| SORT bucket DESC
-| LIMIT 30
-```
+| Generator | What It Produces |
+|-----------|-----------------|
+| **9 scenario services** | Application logs, traces, errors |
+| **Host metrics** | CPU, memory, disk, network for 3 cloud hosts |
+| **Kubernetes metrics** | Node, pod, container metrics |
+| **Nginx metrics + logs** | Access logs, error logs, request spans |
+| **MySQL logs** | Slow query + error logs |
+| **VPC flow logs** | Network flow telemetry |
+| **Distributed traces** | Multi-service request chains |
 
 ---
 
-## Step 2 — Latency & Performance
+## Explore #1 — Logs via ES|QL
 
-**P99 latency by service — identify SLA breaches (trace spans):**
+1. In the **Elastic Serverless** tab → **Discover**
+2. Switch to **ES|QL** mode (top-left toggle)
+3. Run this query:
+
 ```esql
-FROM traces.otel
-| WHERE transaction.duration.us IS NOT NULL
-| STATS
-    p50_ms = PERCENTILE(transaction.duration.us, 50) / 1000,
-    p99_ms = PERCENTILE(transaction.duration.us, 99) / 1000,
-    max_ms = MAX(transaction.duration.us) / 1000
-  BY resource.attributes.service.name
-| SORT p99_ms DESC
-```
-
-**Matching engine latency (should be < 500µs for SLA compliance):**
-```esql
-FROM traces.otel
-| WHERE resource.attributes.service.name == "matching-engine" AND transaction.duration.us IS NOT NULL
-| STATS
-    avg_us = AVG(transaction.duration.us),
-    p99_us = PERCENTILE(transaction.duration.us, 99),
-    count = COUNT(*)
-```
-
-**Settlement processor — batch latency (higher is expected, watch for outliers):**
-```esql
-FROM traces.otel
-| WHERE resource.attributes.service.name == "settlement-processor"
-| STATS max_latency_ms = MAX(transaction.duration.us) / 1000, count = COUNT(*) BY resource.attributes.service.name
-```
-
----
-
-## Step 3 — Error Analysis
-
-**Error rate by service — identify the most impacted services:**
-```esql
-FROM logs.otel
-| STATS
-    total = COUNT(*),
-    errors = COUNT(*) WHERE severity_text == "ERROR"
-  BY resource.attributes.service.name
-| EVAL error_pct = ROUND(errors * 100.0 / total, 2)
-| SORT error_pct DESC
-```
-
-**Find specific financial system errors:**
-```esql
-FROM logs.otel
-| WHERE severity_text == "ERROR"
-| STATS count = COUNT(*) BY body.text
-| SORT count DESC
-| LIMIT 15
-```
-
-**Risk and compliance errors — regulatory impact:**
-```esql
-FROM logs.otel
-| WHERE severity_text == "ERROR"
-  AND (resource.attributes.service.name == "risk-calculator" OR resource.attributes.service.name == "compliance-monitor" OR resource.attributes.service.name == "fraud-detector")
-| KEEP @timestamp, resource.attributes.service.name, body.text
+FROM logs*
+| WHERE @timestamp > NOW() - 5 MINUTES
+| KEEP service.name, body.text, severity_text, @timestamp
 | SORT @timestamp DESC
-| LIMIT 20
+| LIMIT 50
 ```
+
+You should see a stream of logs from multiple services. Once you confirm data is flowing, try filtering to errors only:
+
+```esql
+FROM logs*
+| WHERE @timestamp > NOW() - 15 MINUTES
+| WHERE severity_text == "ERROR"
+| STATS error_count = COUNT(*) BY service.name
+| SORT error_count DESC
+```
+
+**Things to notice:**
+- `service.name`: `auction-engine`, `card-printing-system`, `digital-marketplace`, `packaging-fulfillment`, `cloud-inventory-scanner`, `nginx-proxy`, `mysql-primary`, and more
+- `severity_text`: `INFO`, `WARN`, `ERROR`
+- `body.text` contains the raw log message and error type
 
 ---
 
-## Step 4 — Multi-Cloud Health
+## Explore #2 — APM / Services
 
-**Health by cloud provider:**
+1. In the **Elastic Serverless** tab → **Applications → Service inventory**
+2. You should see **7 services** — the 5 application services plus `nginx-proxy` and `mysql-primary`
+   > The remaining 2 network/infrastructure services (`wifi-controller`, `network-controller`, `firewall-gateway`, `dns-dhcp-service`) emit logs only — no traces — so they won't appear here
+3. Click any service to see latency, throughput, and error rate
+4. Open a transaction to see the **distributed trace waterfall**
+
+---
+
+## Explore #3 — Infrastructure / Hosts
+
+1. In the **Elastic Serverless** tab → **Observability → Infrastructure**
+2. You should see 3 hosts — one per cloud provider:
+   - `fanatics-aws-host-01`
+   - `fanatics-gcp-host-01`
+   - `fanatics-azure-host-01`
+3. Click a host to see CPU, memory, disk, and network metrics
+
+> **Note:** If hosts don't appear immediately, wait 1–2 minutes for the host metrics generator to send its first batch.
+
+---
+
+## Explore #4 — Dashboards
+
+The deployer created an **Executive Dashboard** pre-configured for your scenario. Find it in:
+
+**Elastic Serverless** tab → **Dashboards** → search "Fanatics" (or "Executive")
+
+---
+
+## Explore #5 — ES|QL Time Series Queries
+
+In the **Elastic Serverless** tab → **Discover** → **ES|QL** mode, try these queries against the live metrics stream.
+
+### Auction health at a glance
 ```esql
-FROM logs.otel
+TS metrics*
+| WHERE @timestamp > NOW() - 15 MINUTES
+| EVAL minute = DATE_TRUNC(1 minute, @timestamp)
 | STATS
-    total = COUNT(*),
-    errors = COUNT(*) WHERE severity_text == "ERROR"
-  BY resource.attributes.cloud.provider, resource.attributes.cloud.region
-| EVAL error_rate = ROUND(errors * 100.0 / total, 2)
-| SORT error_rate DESC
+    active_auctions = AVG(auction.active_auctions),
+    bid_latency_ms  = AVG(auction.bid_latency_ms),
+    bids_per_min    = AVG(auction.bids_per_min),
+    websocket_conns = AVG(auction.websocket_connections)
+  BY minute
+| SORT minute DESC
 ```
 
-**Instrument trading activity (order instrument distribution):**
+### Spot a latency spike before users notice
 ```esql
-FROM logs.otel
-| WHERE attributes.instrument IS NOT NULL
-| STATS trades = COUNT(*) BY attributes.instrument
-| SORT trades DESC
-| LIMIT 10
+TS metrics*
+| WHERE @timestamp > NOW() - 30 MINUTES
+| EVAL minute = DATE_TRUNC(1 minute, @timestamp)
+| STATS avg_latency = AVG(auction.bid_latency_ms) BY minute
+| EVAL status = CASE(
+    avg_latency > 45, "🔴 CRITICAL",
+    avg_latency > 30, "🟡 DEGRADED",
+    "🟢 HEALTHY"
+  )
+| SORT minute DESC
 ```
 
+### Card printing throughput vs queue depth
+```esql
+TS metrics*
+| WHERE @timestamp > NOW() - 20 MINUTES
+| EVAL minute = DATE_TRUNC(1 minute, @timestamp)
+| STATS
+    queue_depth    = AVG(card_printing.queue_depth),
+    throughput     = AVG(card_printing.throughput),
+    substrate_temp = AVG(card_printing.substrate_temp)
+  BY minute
+| EVAL backlog_ratio = ROUND(queue_depth / throughput, 2)
+| SORT minute DESC
+```
+
+### Multi-cloud compliance drift
+```esql
+TS metrics*
+| WHERE @timestamp > NOW() - 30 MINUTES
+| EVAL bucket5m = DATE_TRUNC(5 minutes, @timestamp)
+| STATS
+    aws_compliance   = AVG(cloud_inventory.aws.compliance_pct),
+    gcp_compliance   = AVG(cloud_inventory.gcp.compliance_pct),
+    azure_compliance = AVG(cloud_inventory.azure.compliance_pct)
+  BY bucket5m
+| EVAL lowest = LEAST(aws_compliance, gcp_compliance, azure_compliance)
+| EVAL at_risk_cloud = CASE(
+    lowest == aws_compliance, "AWS",
+    lowest == gcp_compliance, "GCP",
+    "Azure"
+  )
+| SORT bucket5m DESC
+```
+
+### Log volume by service and severity over time
+```esql
+FROM logs*
+| WHERE @timestamp > NOW() - 30 MINUTES
+| EVAL minute = DATE_TRUNC(1 minute, @timestamp)
+| STATS
+    errors = COUNT(*) WHERE severity_text == "ERROR",
+    warnings = COUNT(*) WHERE severity_text == "WARN",
+    total  = COUNT(*)
+  BY minute, service.name
+| SORT minute DESC, total DESC
+```
+
+> **Tip:** After triggering a chaos fault in the next challenge, re-run this query to watch the error count spike for the affected service in real time — while healthy services stay flat.
+
 ---
 
-## Step 5 — AI Agent Questions
+## Check Your Work
 
-Open the Elastic AI Assistant and ask:
+In the **Terminal** tab, run:
 
-> "Using OTLP logs (`logs.otel`) and traces (`traces.otel`), show me a complete health summary of all 9 trading services: error rate, P99 latency, and total event count for the last 30 minutes."
+```bash
+demo-deployments
+```
 
-> "Which instruments and order types are generating the most errors in OTLP logs (`logs.otel`)? (Hint: inspect log record attribute fields in the Discover field list.)"
+This shows the active deployment with its scenario, namespace, Confirm it matches what you see in Elastic Serverless.
 
-> "Compare the latency profile of matching-engine vs. settlement-processor. Which has more variance and why would that be expected?"
+You can also run:
+```bash
+demo-status
+```
 
----
+To see all 9 services (7 with traces, 4 network/infra services with logs only) and their telemetry send rates.
 
-## ✅ Completion Check
-
-You'll pass this challenge when:
-- The generator is running
-- At least 50 documents exist in OTLP log streams (`logs.otel`)
-- All 9 financial services are present
-- Error telemetry exists in the index
+✅ **Ready to continue when** you've seen logs, traces, or metrics in Elastic Serverless and confirmed services are healthy.

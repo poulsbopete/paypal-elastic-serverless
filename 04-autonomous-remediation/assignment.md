@@ -56,163 +56,88 @@ timelimit: 1200
 enhanced_loading: null
 ---
 
-# Challenge 4 — Autonomous Remediation
+# Autonomous Investigation & Remediation
 
-## Step 1 — Resolve the Fault
-
-In the **Demo App** tab → **Chaos Controller**:
-1. Find the active fault channel (e.g., Channel 1 — Order Book Inconsistency)
-2. Click **Resolve** to clear the fault
-3. Observe the service health tiles return to green
-
-The matching engine's order book is now re-synced. Watch the error rate drop in real-time.
+In this final challenge, you'll watch Elastic autonomously investigate the fault you injected and remediate it — then verify the full loop has closed.
 
 ---
 
-## Step 2 — Recovery Telemetry Analysis
+## Step 1 — Watch the Alert Fire
 
-In **Elastic Serverless → Discover** (ES|QL mode):
+First, confirm the alert rule detected your fault:
 
-**Observe the recovery — error rate should be dropping:**
-```esql
-FROM logs.otel
-| WHERE @timestamp > NOW() - 30 minutes
-| STATS errors = COUNT(*) WHERE severity_text == "ERROR"
-  BY resource.attributes.service.name, bucket = DATE_TRUNC(2 minutes, @timestamp)
-| SORT bucket DESC, errors DESC
-| LIMIT 30
+**Observability → Alerts**
+
+Within 30–60 seconds of triggering a fault you should see an active alert. If no alert appears yet, wait a minute — the ES|QL rules run on a 30-second interval.
+
+---
+
+## Step 2 — Watch the Workflow Execute
+
+Once an alert fires, the **Significant Event Notification** workflow runs automatically. In the **Elastic Serverless** tab:
+
+**Observability → Workflows**
+
+Find **Fanatics Collectibles Significant Event Notification** and click **Executions** to see:
+- `count_errors` — ES|QL query counting recent errors
+- `run_rca` — AI agent root-cause analysis
+- `create_case` — Kibana case created with RCA findings
+
+> **Note:** The **Remediation Action** workflow is a separate workflow called on-demand — it won't show executions here unless you manually trigger it.
+
+---
+
+## Step 3 — Review the AI Agent Investigation & Remediation
+
+In the workflow execution log, expand the **run_rca** step to see what the AI agent did:
+
+- **Error identification** — which service, which error type
+- **Log correlation** — how many errors in the detection window
+- **Root cause hypothesis** — what the AI agent determined
+- **Remediation executed** — the agent automatically calls the `remediation_action` tool to resolve the fault
+
+You can also chat directly with the AI agent — click **AI Agent** (top right in the Elastic Serverless tab) and ask:
+
+```
+What happened with the fault that was just detected? What caused it and how should it be resolved?
 ```
 
-**Full incident timeline — what happened and when:**
+---
+
+## Step 4 — Confirm the Loop Closed
+
+After the workflow completes, verify end-to-end in the **Elastic Serverless** tab:
+
+1. **Cases** — a new case with the AI's root-cause analysis and remediation summary
+2. **Observability → Alerts** — alert moves to "Recovered" state
+3. **Discover → ES|QL** — error rate drops back to baseline:
 ```esql
-FROM logs.otel
+FROM logs*
+| WHERE @timestamp > NOW() - 5 MINUTES
 | WHERE severity_text == "ERROR"
-| STATS
-    first_error = MIN(@timestamp),
-    last_error = MAX(@timestamp),
-    peak_errors = COUNT(*)
-  BY resource.attributes.service.name
-| SORT peak_errors DESC
+| STATS error_count = COUNT(*) BY service.name
+| SORT error_count DESC
 ```
-
-**Latency recovery — confirm matching engine is back within SLA:**
-```esql
-FROM traces.otel
-| WHERE resource.attributes.service.name == "matching-engine" AND transaction.duration.us IS NOT NULL
-| STATS p99_ms = PERCENTILE(transaction.duration.us, 99) / 1000
-  BY bucket = DATE_TRUNC(2 minutes, @timestamp)
-| SORT bucket DESC
-| LIMIT 15
-```
+4. **Demo App → Chaos** link — all channels back to **STANDBY**
 
 ---
 
-## Step 3 — ML Anomaly Detection Review
+## Step 5 — Try a Cascade (Optional)
 
-Navigate to **Kibana → Machine Learning → Anomaly Detection**.
-
-Review the three anomaly jobs:
-
-| Job | Purpose | Expected Anomaly Score |
-|-----|---------|----------------------|
-| `paypal-service-error-spike` | Error rate spikes per service | High during fault |
-| `paypal-trade-volume-anomaly` | Order volume drops or surges | Medium during fault |
-| `paypal-trading-pipeline-degradation` | Order gateway + matching engine | High during fault |
-
-Ask the AI Assistant to explain the anomaly:
-
-> "The ML job paypal-service-error-spike detected an anomaly in the order-gateway service. Explain what this means and what it tells us about the health of the trading pipeline."
+Trigger **multiple channels at once** from the **Demo App → Chaos** link to see cascade effects — inject channels 7, 8, and 9 (all GCP network_access services). Watch how the AI agent correlates errors across multiple services back to a single root cause, then resolves all three automatically.
 
 ---
 
-## Step 4 — SLO Burn Rate Analysis
+## What You've Built
 
-Navigate to **Kibana → Observability → SLOs**.
+By completing this lab, you've seen the complete Elastic Autonomous Observability loop:
 
-Review the three SLOs created for the financial platform:
+| Stage | Elastic Feature |
+|-------|----------------|
+| **Instrument** | OTLP ingestion — logs, metrics, traces |
+| **Detect** | ES|QL alert rules — real-time anomaly detection |
+| **Investigate** | AI Agent with tools — automated root-cause analysis |
+| **Remediate** | Elastic Serverless Workflows — auto-remediation + notification |
+| **Verify** | Dashboards & APM — confirm resolution |
 
-| SLO | Target | Indicator |
-|-----|--------|-----------|
-| **Availability SLO** | 95% | Logs (`logs-apm.otel-*`): good events = not ERROR severity |
-| **Latency SLO** | 85% spans < 2s | Traces (`traces-apm.otel-*`): `transaction.duration.us` ≤ 2,000,000 |
-| **Error Rate SLO** | 95% | Traces (`traces-apm.otel-*`): spans where `status.code` is not Error |
-
-Check the **burn rate** for each SLO — did the fault burn into our error budget?
-
----
-
-## Step 5 — Advanced ES|QL Analytics
-
-**Build an incident MTTR report:**
-```esql
-FROM logs.otel
-| STATS
-    total_events = COUNT(*),
-    error_events = COUNT(*) WHERE severity_text == "ERROR",
-    services_affected = COUNT_DISTINCT(resource.attributes.service.name) WHERE severity_text == "ERROR"
-| EVAL overall_error_rate = ROUND(error_events * 100.0 / total_events, 2)
-```
-
-**Cross-cloud incident impact (did one cloud provider take more errors?):**
-```esql
-FROM logs.otel
-| STATS
-    total = COUNT(*),
-    errors = COUNT(*) WHERE severity_text == "ERROR"
-  BY resource.attributes.cloud.provider
-| EVAL error_rate = ROUND(errors * 100.0 / total, 2)
-| SORT error_rate DESC
-```
-
-**Settlement impact — did any T+2 settlements miss their deadline?**
-```esql
-FROM logs.otel
-| WHERE resource.attributes.service.name == "settlement-processor" AND severity_text == "ERROR"
-| STATS count = COUNT(*), error_types = VALUES(body.text) BY resource.attributes.service.name
-```
-
-**Order types most impacted during fault:**
-```esql
-FROM logs.otel
-| WHERE severity_text == "ERROR" AND `order.type` IS NOT NULL
-| STATS errors = COUNT(*) BY `order.type`
-| SORT errors DESC
-```
-
----
-
-## Step 6 — AI-Powered Root Cause Analysis
-
-Ask the Elastic AI Assistant these questions for a complete executive summary:
-
-> "Generate a complete incident report for the last 30 minutes from OTLP logs (`logs.otel`). Include: services affected, peak error rates, latency impact, estimated duration, and recommended preventive measures."
-
-> "Based on the telemetry in OTLP logs (`logs.otel`), did the order-gateway fault cascade to the matching-engine and risk-calculator? Show evidence from the data."
-
-> "What Elastic features (ML anomaly detection, SLOs, alerting, workflows) would provide the fastest time-to-detect for an OMS-BOOK-IMBALANCE event? Recommend an optimal monitoring setup."
-
-> "Compare PayPal's current CAL logging architecture vs. the OpenTelemetry + Elastic Serverless approach demonstrated here. What are the top 3 operational benefits for PayPal's financial platform?"
-
----
-
-## Step 7 — The Autonomous Architecture
-
-**How Elastic enables zero-touch remediation for PayPal:**
-
-1. **Detection** — ML anomaly jobs detect error spikes within 1 bucket span (5 minutes)
-2. **Alerting** — Custom threshold rules fire immediately when errors exceed baseline
-3. **AI Diagnosis** — AI Assistant provides instant root cause analysis across all 9 services
-4. **Workflows** — Automated remediation: circuit breakers, incident tickets, runbook execution
-5. **SLO Tracking** — Real-time burn rate monitoring with proactive escalation
-
-This replaces the manual, CAL-dependent process that required 3–5 systems and 30+ minutes to diagnose.
-
----
-
-## ✅ Completion Check
-
-You'll pass this challenge when:
-- The demo app is healthy
-- The generator is still running
-- No active fault channels remain
-- Substantial telemetry has accumulated in OTLP log streams (`logs.otel`)
+✅ **Ready to complete when** all fault channels are resolved (no active chaos).

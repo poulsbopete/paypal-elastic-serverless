@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Challenge 4 check: verify telemetry is still flowing and no active fault channels.
+# Challenge 4 check: verify all fault channels are resolved (chaos is cleared).
 set -euo pipefail
 
 fail() { echo "❌ $*"; exit 1; }
@@ -11,12 +11,7 @@ APP="http://localhost:8090"
 curl -sf "${APP}/health" >/dev/null 2>&1 || fail "Demo app is not responding."
 pass "Demo app is healthy"
 
-# ── Generator still running ───────────────────────────────────────────────────
-systemctl is-active --quiet paypal-otel-gen 2>/dev/null \
-  || fail "Telemetry generator stopped. Run: systemctl start paypal-otel-gen"
-pass "Telemetry generator running"
-
-# ── No active fault channels ──────────────────────────────────────────────────
+# ── Deployment exists ─────────────────────────────────────────────────────────
 DEPS="$(curl -sf "${APP}/api/deployments" 2>/dev/null || echo "[]")"
 DEP_ID="$(echo "$DEPS" | python3 -c "
 import sys, json
@@ -24,60 +19,36 @@ deps = json.load(sys.stdin)
 print(deps[0]['deployment_id'] if deps else '')
 " 2>/dev/null || echo "")"
 
-if [[ -n "$DEP_ID" ]]; then
-  CHAOS="$(curl -sf "${APP}/api/chaos/status?deployment_id=${DEP_ID}" 2>/dev/null || echo "{}")"
-else
-  CHAOS="$(curl -sf "${APP}/api/chaos/status" 2>/dev/null || echo "{}")"
-fi
+[[ -n "$DEP_ID" ]] || fail "No active deployment found. Did you complete Challenge 1?"
+pass "Deployment found: $DEP_ID"
+
+# ── All chaos channels are resolved ──────────────────────────────────────────
+CHAOS="$(curl -sf "${APP}/api/chaos/status?deployment_id=${DEP_ID}" 2>/dev/null || echo "{}")"
 
 ACTIVE_CHANNELS="$(echo "$CHAOS" | python3 -c "
 import sys, json
-try:
-    ch = json.load(sys.stdin)
-    active = [k for k,v in ch.items() if isinstance(v,dict) and v.get('state') == 'ACTIVE']
-    print(','.join(active) if active else '')
-except: print('')
+ch = json.load(sys.stdin)
+active = [k for k,v in ch.items() if isinstance(v,dict) and v.get('state') == 'ACTIVE']
+print(','.join(active) if active else '')
 " 2>/dev/null || echo "")"
 
 if [[ -n "$ACTIVE_CHANNELS" ]]; then
-  fail "Fault channel(s) still active: $ACTIVE_CHANNELS.
-To resolve: open Demo App → Chaos Controller → RESOLVE all active channels."
+  fail "Fault channel(s) still active: $ACTIVE_CHANNELS
+
+The Elastic workflow should resolve these automatically within 2-3 minutes of the alert firing.
+If no alert has fired yet, wait a moment — alert rules run on a 30-second interval.
+To resolve from the UI: open the Demo App → Chaos Controller and click RESOLVE on each active channel."
 fi
 
-pass "No active fault channels — incident resolved ✓"
-
-# ── Substantial telemetry accumulated ─────────────────────────────────────────
-ES_URL=$(python3 -c "
-import json
-try:
-    d = json.load(open('/tmp/project_results.json'))
-    print(next(iter(d.values()))['endpoints']['elasticsearch'])
-except: print('')
-" 2>/dev/null || echo "")
-
-API_KEY=$(python3 -c "
-import json
-try:
-    d = json.load(open('/tmp/project_results.json'))
-    print(next(iter(d.values()))['credentials']['api_key'])
-except: print('')
-" 2>/dev/null || echo "")
-
-if [[ -n "$ES_URL" && -n "$API_KEY" ]]; then
-  DOC_COUNT=$(curl -sf "${ES_URL}/logs-apm.otel-*/_count" \
-    -H "Authorization: ApiKey ${API_KEY}" 2>/dev/null \
-    | python3 -c "import sys,json; print(json.load(sys.stdin).get('count',0))" 2>/dev/null || echo "0")
-  pass "Total telemetry in Elastic: $DOC_COUNT documents across all 9 financial platform services ✓"
-fi
+pass "All fault channels are resolved — no active chaos"
 
 echo ""
-echo "🎉 Congratulations! You've completed the PayPal Payments Platform Observability lab."
+echo "🎉 Congratulations! You've completed the Elastic Autonomous Observability lab."
 echo ""
-echo "   ✓ Connected live OpenTelemetry telemetry to Elastic Serverless"
-echo "   ✓ Queried logs, latency, and error rates across 9 financial platform services"
-echo "   ✓ Injected a realistic trading fault and watched real-time detection"
-echo "   ✓ Witnessed autonomous AI investigation and workflow-driven remediation"
-echo "   ✓ Explored ML anomaly detection across trading operation patterns"
+echo "   ✓ Connected live OTLP telemetry to Elastic Cloud"
+echo "   ✓ Deployed 9 microservices across 3 cloud providers"
+echo "   ✓ Injected a realistic fault and watched real-time detection"
+echo "   ✓ Witnessed autonomous AI investigation and remediation"
 echo ""
-echo "   The complete loop — instrument → detect → investigate → remediate — ran without human intervention."
+echo "   The full loop — instrument → detect → investigate → remediate — ran without human intervention."
 exit 0

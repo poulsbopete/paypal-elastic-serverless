@@ -51,129 +51,92 @@ timelimit: 1200
 enhanced_loading: null
 ---
 
-# Challenge 3 — Inject a Financial Fault
+# Inject a Fault and Watch Elastic Detect It
 
-## The Scenario
-
-A rogue trading algorithm has started placing orders that stress the matching engine's order book. Bid/ask spreads are widening, and replication between the primary and replica shards is falling behind.
-
-**Your mission:** Inject the fault, observe the error spike, and let Elastic's alerting + AI Assistant help you diagnose the root cause.
+Now it's time to break something. The incident simulator lets you inject realistic faults into the simulated environment — then watch Elastic light up.
 
 ---
 
-## Step 1 — Inject the Fault
+## Trigger a Fault
 
-In the **Demo App** tab:
-
-1. Click **Chaos Controller** (or the "Market Disruption Simulator" button)
-2. Select **Channel 1 — Order Book Inconsistency** from the fault channel list
-3. Click **Inject Fault**
-4. Observe the service health tiles change from green → red/orange
-
-The fault injects `OMS-BOOK-IMBALANCE` errors into the order-gateway and matching-engine services.
+1. Open the **Demo App** tab
+2. Find your running **Fanatics Collectibles** deployment and click the **Chaos** link next to it
+3. You'll see 20 fault channels organized by subsystem and cloud provider
+4. Select a channel from the dropdown and click **Inject Fault**
 
 ---
 
-## Step 2 — Watch Elastic Detect It
+## What to Watch in Elastic Serverless
 
-Switch to the **Elastic Serverless** tab. The alerts page should show active alerts firing within 1–2 minutes.
+Once you trigger a fault, switch to the **Elastic Serverless** tab and watch:
 
-You should see:
-- **PayPal — Order Gateway Error Spike** alert → ACTIVE
-- **PayPal — High Error Rate (any service)** alert → ACTIVE
+### 1. Logs — Error Spike
 
-If alerts aren't yet visible, run this ES|QL query in **Discover** to confirm errors are flowing:
+The tab opens directly to the error log stream. Or navigate there manually:
+
+**Discover → ES|QL** and run:
 
 ```esql
-FROM logs.otel
+FROM logs*
+| WHERE @timestamp > NOW() - 10 MINUTES
 | WHERE severity_text == "ERROR"
-  AND (resource.attributes.service.name == "order-gateway" OR resource.attributes.service.name == "matching-engine")
-| STATS errors = COUNT(*) BY bucket = DATE_TRUNC(1 minute, @timestamp)
-| SORT bucket DESC
-| LIMIT 10
+| STATS error_count = COUNT(*) BY service.name
+| SORT error_count DESC
 ```
+
+You should see an error spike from the affected service within seconds.
+
+### 2. Alert Rules — Detection
+**Observability → Alerts**
+
+The ES|QL alert rules will fire within 30–60 seconds of the error spike. You'll see an active alert appear.
+
+### 3. AI Agent Investigation
+**Observability → AI Assistant** (or the Workflows execution log)
+
+The alert triggers a workflow that calls the AI agent. The agent:
+- Identifies the error type from the alert tags
+- Queries recent error logs for context
+- Searches for related events
+- Produces a root-cause analysis summary
 
 ---
 
-## Step 3 — Investigate with ES|QL
+## Verify the Fault is Active
 
-**Find the specific OMS fault signatures:**
-```esql
-FROM logs.otel
-| WHERE body.text LIKE "*OMS-BOOK-IMBALANCE*" OR body.text LIKE "*ME-LATENCY-SLA*"
-| KEEP @timestamp, resource.attributes.service.name, body.text, severity_text
-| SORT @timestamp DESC
-| LIMIT 20
+In the Terminal tab:
+
+```bash
+demo-chaos
 ```
 
-**Measure the error rate spike:**
-```esql
-FROM logs.otel
-| WHERE @timestamp > NOW() - 15 minutes
-| STATS
-    total = COUNT(*),
-    errors = COUNT(*) WHERE severity_text == "ERROR"
-  BY resource.attributes.service.name
-| EVAL error_pct = ROUND(errors * 100.0 / total, 2)
-| WHERE error_pct > 0
-| SORT error_pct DESC
-```
-
-**Trace cascade impact — did matching engine errors affect settlement?**
-```esql
-FROM logs.otel
-| WHERE severity_text == "ERROR"
-  AND @timestamp > NOW() - 15 minutes
-| STATS count = COUNT(*) BY resource.attributes.service.name
-| SORT count DESC
-```
-
-**Compare error rates: before vs. during the fault:**
-```esql
-FROM logs.otel
-| WHERE resource.attributes.service.name IN ("order-gateway", "matching-engine", "risk-calculator")
-| STATS errors = COUNT(*) WHERE severity_text == "ERROR"
-  BY resource.attributes.service.name, bucket = DATE_TRUNC(2 minutes, @timestamp)
-| SORT bucket DESC, errors DESC
-```
+You should see the triggered channel with `"state": "ACTIVE"`.
 
 ---
 
-## Step 4 — Check the ML Anomaly Jobs
+## Fault Channel Reference (Fanatics Scenario)
 
-Navigate to **Kibana → Machine Learning → Anomaly Detection**. Look for:
-- `paypal-service-error-spike` — should show an anomaly score spike on order-gateway
-- `paypal-trading-pipeline-degradation` — elevated anomaly score across the order execution pipeline
+| Ch | Name | Subsystem | Cloud |
+|----|------|-----------|-------|
+| 1 | MAC Address Flapping | network_core | Azure |
+| 2 | Spanning Tree Topology Change | network_core | Azure |
+| 3 | BGP Peer Flapping | network_core | Azure |
+| 4 | Firewall Session Table Exhaustion | security | Azure |
+| 5 | Firewall CPU Overload | security | Azure |
+| 6 | SSL Decryption Certificate Expiry | security | Azure |
+| 7 | WiFi AP Disconnect Storm | network_access | GCP |
+| 8 | WiFi Channel Interference | network_access | GCP |
+| 9 | Client Authentication Storm | network_access | GCP |
+| 10 | DNS Resolution Failure Over VPN | network_services | Azure |
+| 11 | DHCP Lease Storm | network_services | Azure |
+| 12 | Auction Bid Latency Spike | commerce | AWS |
+| 13 | Payment Processing Timeout | commerce | AWS |
+| 14 | Product Catalog Sync Failure | commerce | AWS |
+| 15 | Print Queue Overflow | manufacturing | AWS |
+| 16 | Quality Control Rejection Spike | manufacturing | AWS |
+| 17 | Fulfillment Label Printer Failure | logistics | GCP |
+| 18 | Warehouse Scanner Desync | logistics | GCP |
+| 19 | Orphaned Cloud Resource Alert | cloud_ops | GCP |
+| 20 | Cross-Cloud VPN Tunnel Flapping | cloud_ops | GCP |
 
----
-
-## Step 5 — AI Agent Root Cause Analysis
-
-Open the **Elastic AI Assistant** and ask:
-
-> "I'm seeing OMS-BOOK-IMBALANCE errors in OTLP logs (`logs.otel`) for the order-gateway and matching-engine services starting in the last 15 minutes. What is the likely root cause and which other services are at risk of cascading failure?"
-
-> "Query OTLP logs (`logs.otel`) for error patterns in the last 10 minutes. Show me the error rate per service and identify the primary fault source."
-
-> "The matching engine has elevated latency. What does 'OMS-BOOK-IMBALANCE' mean in a trading system context and what immediate remediation steps should we take?"
-
----
-
-## Step 6 — Automated Remediation
-
-Elastic Workflows detect the fault and can automatically:
-- Page the on-call SRE via PagerDuty/Slack
-- Trigger a circuit breaker to halt new order intake
-- Initiate order book reconciliation procedures
-- File a regulatory incident report
-
-Navigate to **Kibana → Observability → Alerts** to see the active incidents and triggered workflow actions.
-
----
-
-## ✅ Completion Check
-
-You'll pass this challenge when:
-- The demo app is healthy
-- A fault has been injected via the Chaos Controller
-- Error telemetry from the fault is present in OTLP log streams (`logs.otel`)
+✅ **Ready to continue when** at least one fault channel is active (verified by `demo-chaos` showing `"active": true`).

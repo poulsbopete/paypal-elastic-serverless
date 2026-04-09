@@ -76,7 +76,7 @@ paypal-elastic-serverless/
 ├── docs/
 │   └── splash.html                    # PayPal value props page (hosted via rawcdn.githack.com)
 ├── track_scripts/
-│   ├── setup-es3-api                  # Main provisioning script (~1500 lines)
+│   ├── setup-es3-api                  # Main provisioning script (same baseline as elastic-autonomous-observability, ~850 lines)
 │   └── cleanup-es3-api                # Teardown (deletes Elastic Cloud project)
 ├── 01-connect-and-deploy/
 │   ├── assignment.md                  # Challenge content + tabs
@@ -104,75 +104,44 @@ paypal-elastic-serverless/
 
 ## What Gets Provisioned at Setup
 
-`track_scripts/setup-es3-api` runs once at track start and:
+`track_scripts/setup-es3-api` is aligned with **[elastic-autonomous-observability](https://play.instruqt.com/manage/elastic/tracks/elastic-autonomous-observability)**. It runs once at track start and:
 
-1. **Creates an Elastic Cloud Serverless project** (Observability tier, AWS us-east-1) using `ESS_CLOUD_API_KEY`
-2. **Generates an API key** (`admin` user, `.encoded` format for OTLP `ApiKey` auth)
-3. **Derives the OTLP endpoint** from the ES URL (`.es.` → `.ingest.`, port forced to `443`)
-4. **Installs NGINX** as a Kibana proxy on port 8080 with auto-injected `ApiKey` auth header
-5. **Clones and configures** `elastic-launch-demo` (branch `feat/back-navigation-noc-chaos`)
-6. **Applies runtime patches** to the demo app:
-   - Renames all Fanatics services/channels/displays → PayPal equivalents
-   - Fixes OTLP error handling (`raise_for_status()` + `HTTPStatusError` logging)
-   - Ensures chaos channel dropdown is always populated (static fallback)
-   - Fixes back-navigation buttons to use `/home` instead of `history.back()`
-7. **Launches the fanatics scenario** with the Elastic Serverless credentials
-8. **Creates Kibana Workflows** (PayPal-specific alert automation playbooks)
-9. **Creates Kibana Dashboards** (PayPal-specific, imported via `.ndjson`)
-10. **Creates SLOs** for all 7 services
-11. **Creates ML anomaly detection jobs** (see below)
-12. **Creates index aliases** (`logs.otel`, `traces.otel`, `metrics.otel`) once data streams exist
-13. **Installs diagnostic helper commands** in `/usr/local/bin`
+1. **Creates an Elastic Cloud Serverless Observability project** (AWS us-east-1) using `ESS_CLOUD_API_KEY`
+2. **Generates an Elasticsearch API key** for the `admin` user (`.encoded` form)
+3. **Installs NGINX** on port **8080** as a Kibana reverse proxy (Basic auth to the project)
+4. **Serves** `/loading` and `/chatbot` static pages
+5. **Starts** the JSON credentials server on port **8081**
+6. **Clones** `elastic-launch-demo` (branch `feat/back-navigation-noc-chaos`), installs deps, starts **systemd** `elastic-demo` on port **8090**
+7. **POSTs `/api/setup/launch`** with `scenario_id: fanatics` so the **Fanatics Live** scenario deploys into the project (alerts, workflows, dashboards, ML, etc. come from that deployment — not from extra bash in this repo)
 
----
-
-## ML Anomaly Detection Jobs
-
-Three ML jobs are created automatically and start scanning telemetry in real time:
-
-| Job ID | Detector | Data |
-|---|---|---|
-| `paypal-service-error-spike` | `high_count` errors by `resource.attributes.service.name` | `logs-apm.otel-*` (ERROR only) |
-| `paypal-trade-volume-anomaly` | `count` by `resource.attributes.service.name` | `logs-apm.otel-*` (all logs) |
-| `paypal-trading-pipeline-degradation` | `high_count` errors in trading pipeline | `logs-apm.otel-*` (order-gateway, matching-engine, risk, market-data) |
-
-View in Kibana: **Analytics → Machine Learning → Anomaly Detection → Anomaly Explorer**
+Shell aliases: `demo-logs`, `demo-status`, `demo-deployments`, `demo-chaos`, `demo-restart` (see **Diagnostic Commands**).
 
 ---
 
 ## ES|QL Quick Reference
 
-Queries target **APM OpenTelemetry** data streams (`logs-apm.otel-*`, `traces-apm.otel-*`, …). After setup, aliases `logs.otel` / `traces.otel` / `metrics.otel` also work in ES|QL:
+After the scenario is running, use Discover’s data views (for example **All logs** / `logs-*`) or ES|QL against `logs*`, `metrics*`, `traces-*`:
 
 ```esql
--- Sanity check: confirm OTLP logs are flowing
-FROM logs-apm.otel-*
-| STATS total = COUNT(*), services = COUNT_DISTINCT(resource.attributes.service.name)
+FROM logs*
+| STATS total = COUNT(*), services = COUNT_DISTINCT(service.name)
+| LIMIT 10
 
--- Errors by service (last 30 min)
-FROM logs-apm.otel-*
+FROM logs*
 | WHERE @timestamp > NOW() - 30 minutes AND severity_text == "ERROR"
-| STATS errors = COUNT(*) BY resource.attributes.service.name
+| STATS errors = COUNT(*) BY service.name
 | SORT errors DESC
-
--- Recent error log messages for a specific service
-FROM logs-apm.otel-*
-| WHERE resource.attributes.service.name == "payments-orchestrator" AND severity_text == "ERROR"
-| KEEP @timestamp, resource.attributes.service.name, body.text, trace.id
-| SORT @timestamp DESC
-| LIMIT 20
 ```
 
-### Key Field Names (OTel → Elastic mapping)
+### Common fields (OTel in Elastic)
 
-| OTel Concept | Field in Elastic | Example |
+| Concept | Typical field | Example |
 |---|---|---|
-| Service identifier | `resource.attributes.service.name` | `checkout-service` |
-| Log message body | `body.text` | `Payment declined: timeout` |
-| Log severity | `severity_text` | `ERROR`, `INFO`, `WARN` |
-| Trace correlation ID | `trace.id` | `4f8a2c3d...` |
-| Timestamp | `@timestamp` | ISO-8601 |
-| Host name | `host.name` | `paypal-prod-us-east-1` |
+| Service | `service.name` | `auction-engine` |
+| Log body | `message` or `body.text` | (depends on integration) |
+| Severity | `log.level` / `severity_text` | `ERROR` |
+| Trace | `trace.id` | hex string |
+| Time | `@timestamp` | ISO-8601 |
 
 ---
 
@@ -195,29 +164,22 @@ Run these in the **Terminal** tab on the Instruqt VM:
 
 | Command | What it does |
 |---|---|
-| `demo-credentials` | Print Kibana URL + API key for the Demo App (no `INSTRUQT_AUTH_TOKEN`; same recovery path as EAO) |
 | `demo-logs` | Stream live demo app logs (`journalctl -f`) |
-| `demo-otlp-test` | Test OTLP auth + connectivity; shows exact HTTP status and data stream existence |
-| `demo-otlp-errors` | Grep app logs for OTLP warnings and errors |
 | `demo-deployments` | Show running scenarios and their Kibana URL |
 | `demo-chaos` | Show chaos channel states |
 | `demo-status` | Show full demo app status JSON |
-| `demo-restart` | Restart the demo app (systemd) |
+| `demo-restart` | Restart the demo app (systemd); clears in-memory deployments — you may need to **Launch** again from the Demo App |
 
-### Executive dashboard shows N/A / (null) after restart
+### Empty Discover or “no active deployment”
 
-The PayPal Executive Dashboard uses **OTLP-backed** data views (`logs*`, `traces-*`, `metrics-*`) with OpenTelemetry-oriented fields (for example `resource.attributes.service.name`, span `status.code`, `transaction.duration.us`). The background **`paypal-otel-gen`** service sends logs, traces, and metrics over OTLP so tiles stay populated even when the Demo App is reconnecting. NGINX/VPC panels still target generic `logs*` integrations and may stay empty in this lab.
+- **Discover empty:** widen the time range (e.g. **Last 15 minutes**) and confirm the **Fanatics** scenario finished deploying (Demo App progress bar).
+- **Chaos Controller:** “NO ACTIVE DEPLOYMENT” means the demo scenario is not running — open **Demo App**, confirm Kibana URL/API key if prompted, and click **Launch** (or wait for auto-launch to finish after track start).
 
-Widen time to **Last 30 minutes** if needed; the dashboard default is **now-30m**.
-
-### Common OTLP troubleshooting
-
-| Symptom | What to run | Expected fix |
-|---|---|---|
-| "Unknown column @timestamp" in ES\|QL | `demo-otlp-test` | If HTTP 200 → wait 30s for data; if 401/403 → API key issue |
-| Generators log "Sent X" but no Kibana data | `demo-otlp-errors` | Look for `OTLP HTTP 401` lines |
-| Empty chaos fault dropdown | `demo-restart` | Reloads static channel registry |
-| Demo App still spinning | `demo-logs` | Check for `ModuleNotFoundError` — run `demo-restart` |
+| Symptom | What to try |
+|---|---|
+| Empty chaos fault dropdown | `demo-restart`, then redeploy from Demo App |
+| Demo App still spinning | `demo-logs` — check for `ModuleNotFoundError` |
+| Kibana proxy errors | `systemctl status nginx` on the VM |
 
 ---
 
@@ -260,20 +222,9 @@ OTLP_URL="${OTLP_URL}:443"
 
 The Elastic Serverless OTLP ingest endpoint always listens on port 443, regardless of what port the Elasticsearch endpoint uses.
 
-### Demo App Patching
+### Provisioning baseline
 
-The `elastic-launch-demo` app is patched at runtime (not forked) to preserve upstream updates. All PayPal customizations live in `track_scripts/setup-es3-api` as Python and bash patch blocks. The key patches are:
-
-| Patch target | What it does |
-|---|---|
-| `scenarios/fanatics/scenario.py` | Renames all services, chaos channels, and display strings to PayPal equivalents |
-| `scenarios/fanatics/services/*.py` | Renames service module files to match the new import paths |
-| `app/main.py` | Returns static channel registry when no deployment is active (fixes empty fault dropdown) |
-| `app/telemetry.py` | Injects `raise_for_status()` + catches `HTTPStatusError` to surface OTLP 4xx errors |
-| `elastic_config/deployer.py` | Accepts HTTP 405 as a valid OTLP endpoint probe response |
-| `app/landing/static/index.html` | Removes broken Elastic Observability and API Endpoints sections |
-| `app/chaos_ui/static/index.html` | Fixes back button to use `/home` instead of `history.back()` |
-| `app/dashboard/static/index.html` | Fixes back button to use `/home` |
+`track_scripts/setup-es3-api` matches **elastic-autonomous-observability**: it does **not** apply PayPal-specific runtime patches to the demo. The VM runs the **Fanatics** scenario from `elastic-launch-demo` (branch `feat/back-navigation-noc-chaos`). Re-add PayPal theming via patches or a fork once the flow is validated.
 
 ---
 
@@ -343,7 +294,7 @@ Use **← →**, **Space**, **Home** / **End**, or click the image halves / dots
 | Track ID | `q7432fqzit6g` |
 | Instruqt org | `elastic` |
 | GitHub repo | `github.com/poulsbopete/paypal-elastic-serverless` |
-| Upstream inspiration | `elastic/elastic-autonomous-observability` (financial scenario; this track is **not** `elastic-autonomous-observability-copy`) |
+| Upstream inspiration | [elastic-autonomous-observability](https://play.instruqt.com/manage/elastic/tracks/elastic-autonomous-observability) — this repo’s `track_scripts/setup-es3-api` is the same baseline; local `elastic-autonomous-observability-copy/` is a reference snapshot |
 | Demo app repo | `github.com/poulsbopete/elastic-launch-demo` (branch `feat/back-navigation-noc-chaos`) |
 
 ---
@@ -356,8 +307,6 @@ Use **← →**, **Space**, **Home** / **End**, or click the image halves / dots
 | Secrets not available in setup script | `ESS_CLOUD_API_KEY` not in Elastic org secret store | Add secret in Instruqt org settings |
 | Demo app never healthy | Python deps failed / import error | `journalctl -u elastic-demo -n 50` on VM |
 | Kibana not loading | NGINX not started | `systemctl status nginx` on VM |
-| "Unknown column @timestamp" in ES\|QL | `logs-apm.otel-*` data stream empty | `demo-otlp-test` → check HTTP status |
-| OTLP silently failing (HTTP 401) | API key not in correct `.encoded` format | Check `agent variable get ES_API_KEY` — should be base64-encoded `id:api_key` |
-| Empty chaos fault dropdown | No active deployment registered | `demo-restart` — static registry fallback serves all channels |
-| ML jobs not appearing in Kibana | Data streams didn't exist at setup time | Jobs auto-start 60s after data flows; check ML → Anomaly Detection |
-| SLOs not created | Kibana not reachable at setup time | Re-run creation manually or restart track |
+| "Unknown column @timestamp" in ES\|QL | Wrong data view / no data yet | Pick **All logs** or `logs*`; widen time range; wait for scenario deploy |
+| Empty chaos fault dropdown | No active deployment | Open Demo App → **Launch**; or `demo-restart` then redeploy |
+| ML / SLOs missing | Scenario not finished pushing assets | Wait for deployment progress; refresh Kibana |
