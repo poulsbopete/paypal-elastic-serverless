@@ -56,7 +56,7 @@
         .card p { font-size: 13px; line-height: 1.7; color: #94a3b8; }
         .card p + p { margin-top: 8px; }
         table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
-        th { background: #1a2640; color: #64748b; text-align: left; padding: 9px 12px; font-weight: 600; border-bottom: 1px solid #243353; }
+        th { background: #1a2640; color: #94a3b8; text-align: left; padding: 9px 12px; font-weight: 600; border-bottom: 1px solid #243353; }
         td { padding: 9px 12px; border-bottom: 1px solid #1a2640; color: #cbd5e1; vertical-align: top; line-height: 1.5; }
         tr:last-child td { border-bottom: none; }
         tr:hover td { background: #141d2e; }
@@ -68,6 +68,7 @@
         .badge-red { background: #2a0f0f; color: #f87171; border: 1px solid #4a1a1a; }
         .badge-green { background: #0a2a1a; color: #4ade80; border: 1px solid #1a4a2a; }
         .badge-blue { background: #0a1929; color: #38bdf8; border: 1px solid #1a3a55; }
+        .badge-gold { background: #2a2410; color: #fcd34d; border: 1px solid #4a3f1a; }
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
         @media(max-width:600px){ .grid-2 { grid-template-columns: 1fr; } }
         .mini { background: #0d1829; border: 1px solid #1a2e4a; border-radius: 8px; padding: 13px 15px; }
@@ -81,12 +82,62 @@
         }
         .kw { color: #ff7b72; } .fn { color: #d2a8ff; }
         .str { color: #a5d6ff; } .cmt { color: #8b949e; font-style: italic; }
-        .services { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 9px; margin-top: 12px; }
-        .svc { background: #0d1829; border: 1px solid #1a2e4a; border-radius: 7px; padding: 10px 12px; }
-        .svc .name { font-size: 12px; font-weight: 700; color: #38bdf8; font-family: monospace; }
-        .svc .desc { font-size: 11px; color: #64748b; margin-top: 3px; }
-        .svc .cloud { font-size: 10px; color: #475569; margin-top: 5px; font-weight: 600; letter-spacing: 0.3px; }
+        /* Service grid: explicit min height + border so cards stay visible on all hosts (e.g. GitHub Pages) */
+        .services {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+            margin-top: 14px;
+        }
+        .svc {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 12px 14px;
+            min-height: 88px;
+            display: flex;
+            flex-direction: column;
+        }
+        .svc .name { font-size: 12px; font-weight: 700; color: #7dd3fc; font-family: ui-monospace, monospace; }
+        .svc .desc { font-size: 11px; color: #94a3b8; margin-top: 4px; flex: 1; }
+        .svc .cloud { font-size: 10px; color: #64748b; margin-top: 8px; font-weight: 600; letter-spacing: 0.3px; }
         .caps { margin-top: 14px; }
+        .tco-callout {
+            margin-top: 14px;
+            padding: 12px 14px;
+            background: #0c1a2e;
+            border: 1px solid #1e4976;
+            border-radius: 8px;
+            font-size: 12px;
+            color: #bae6fd;
+            line-height: 1.65;
+        }
+        .tco-callout a { color: #7dd3fc; font-weight: 600; }
+        .lunch-learn {
+            margin-bottom: 20px;
+            padding: 18px 22px;
+            background: linear-gradient(135deg, #0c2544 0%, #132e4a 100%);
+            border: 1px solid #2a6a9e;
+            border-radius: 10px;
+        }
+        .lunch-learn h2 { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 6px; line-height: 1.35; }
+        .lunch-learn .when { font-size: 14px; font-weight: 700; color: #fcd34d; margin: 4px 0 10px; }
+        .lunch-learn .blurb { font-size: 13px; color: #94c9ee; line-height: 1.65; }
+        .lunch-learn a.workshop {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 12px;
+            padding: 10px 18px;
+            border-radius: 7px;
+            background: #0070ba;
+            color: #fff;
+            text-decoration: none;
+            font-weight: 700;
+            font-size: 13px;
+            border: 1px solid #4a9fd4;
+        }
+        .lunch-learn a.workshop:hover { background: #005a94; }
         .footer { text-align: center; padding: 28px 0 8px; }
         .footer p { font-size: 12px; color: #64748b; margin-bottom: 14px; }
         .footer a {
@@ -111,7 +162,7 @@
 <div class="header">
     <div class="header-left">
         <h1>PayPal Merchant Observability</h1>
-        <p>Powered by Elastic Serverless + OpenTelemetry &mdash; your environment is provisioning</p>
+        <p>Powered by Elastic Cloud Serverless + OpenTelemetry &mdash; your environment is provisioning</p>
     </div>
     <div class="status-badge">
         <div class="status-dot"></div>
@@ -121,165 +172,186 @@
 
 <div class="main">
 
+    <div class="lunch-learn">
+        <div class="section-label" style="margin-bottom:10px;color:#7dd3fc;">Lunch &amp; learn</div>
+        <h2>PayPal Merchant Observability on Elastic Serverless</h2>
+        <p class="when">Thursday, April 23, 2026 &middot; 2:00&ndash;3:15pm</p>
+        <p class="blurb">Use this page as context while your lab provisions. For the live session, open the hands-on Instruqt track (same workshop content).</p>
+        <a class="workshop" href="https://play.instruqt.com/elastic/invite/arvw2ahykhpz" target="_blank" rel="noopener noreferrer">Open Instruqt workshop &rarr;</a>
+    </div>
+
     <!-- 01 THE PROBLEM -->
-    <div class="section-label">01 &mdash; The Problem</div>
+    <div class="section-label">01 &mdash; Today vs Tomorrow</div>
     <div class="card">
-        <h2>Fragmented Observability at PayPal Scale</h2>
-        <p>PayPal processes billions of transactions across a global multi-cloud platform. Every checkout, authorization, fraud decision, and settlement flows through interdependent microservices — each generating signals that today live in separate silos.</p>
+        <h2>Where platform observability is heading</h2>
+        <p>PayPal-scale commerce runs across global regions and clouds. The future is <strong style="color:#e2e8f0">one analytics plane</strong> for logs, metrics, and traces: OpenTelemetry in, governed ingest, ML-aware detection, and AI-assisted response on <strong style="color:#e2e8f0">Elastic Cloud Serverless</strong> so teams spend less time operating backends and more time improving merchant outcomes.</p>
         <table>
-            <thead><tr><th>Current State</th><th>Operational Impact</th></tr></thead>
+            <thead><tr><th>Legacy pattern</th><th>Why it drives cost and risk</th></tr></thead>
             <tbody>
                 <tr>
-                    <td><span class="badge badge-red">CAL Logging</span> Proprietary schema, early-2000s design</td>
-                    <td>No off-the-shelf tooling interoperability; specialist knowledge required to query</td>
+                    <td><span class="badge badge-red">Fragmented stacks</span> Logs, metrics, traces in separate products</td>
+                    <td>Correlating a merchant-impacting incident requires hopping tools; longer MTTR and duplicate licensing</td>
                 </tr>
                 <tr>
-                    <td><span class="badge badge-red">Siloed Signals</span> Traces, metrics, logs in separate tools</td>
-                    <td>Correlating a merchant complaint to a root cause requires hopping between 3–5 tools</td>
+                    <td><span class="badge badge-red">Undifferentiated ingest</span> Everything indexed, forever</td>
+                    <td>Storage and query costs grow with noise; on-call drowns in low-value alerts</td>
                 </tr>
                 <tr>
-                    <td><span class="badge badge-red">Cardinality Pressure</span> Millions of merchant IDs, transaction IDs, regions</td>
-                    <td>Metrics backends choke on high-dimensional label combinations at PayPal's volume</td>
+                    <td><span class="badge badge-red">Self-managed backends</span> Capacity planning, upgrades, sharding</td>
+                    <td>Platform engineering time goes to plumbing, not product reliability</td>
                 </tr>
                 <tr>
-                    <td><span class="badge badge-red">No Trace Context</span> CAL lacks distributed trace propagation</td>
-                    <td>Cross-service incident investigation is manual and error-prone</td>
-                </tr>
-                <tr>
-                    <td><span class="badge badge-red">Operational Overhead</span> Separate ingest pipelines per signal type</td>
-                    <td>Platform engineering time spent maintaining pipelines, not building capabilities</td>
+                    <td><span class="badge badge-red">Weak cross-signal context</span> Inconsistent IDs across signals</td>
+                    <td>Manual stitching across services; error-prone investigations at peak traffic</td>
                 </tr>
             </tbody>
         </table>
     </div>
 
-    <!-- 02 THE SOLUTION -->
-    <div class="section-label">02 &mdash; The Solution</div>
+    <!-- 02 THE SOLUTION + TCO -->
+    <div class="section-label">02 &mdash; Elastic Serverless + Lower TCO</div>
     <div class="card">
-        <h2>Elastic Serverless + OpenTelemetry: One Platform for All Signals</h2>
-        <p>Elastic Serverless provides a zero-ops observability backend purpose-built for the volume, cardinality, and query complexity that PayPal's platform demands. Combined with OpenTelemetry as the instrumentation standard, it replaces the fragmented tool landscape with a single unified destination.</p>
+        <h2>Zero ops backend, usage-aligned economics</h2>
+        <p><strong style="color:#e2e8f0">Elastic Cloud Serverless</strong> removes cluster lifecycle work and aligns spend with what you actually query and retain. Pair it with <strong style="color:#e2e8f0">Elastic Streams</strong> to govern OpenTelemetry ingest (routing, retention, quality) so you index <em>less noise</em> and keep queryable history <em>where it matters</em> &mdash; that combination is how teams talk about <strong style="color:#fcd34d">lower TCO</strong> without giving up depth when incidents strike.</p>
+        <div class="tco-callout">
+            <strong style="color:#fff">TCO in practice:</strong> Model ingest and retention tradeoffs with your team using the
+            <a href="https://o11y-compare.vercel.app/" target="_blank" rel="noopener noreferrer">Observability TCO Comparison</a>
+            workshop companion (illustrative scenarios only). In the lab you will open <strong>Observability &rarr; Streams</strong> and tie stream choices directly to Serverless variable cost.
+        </div>
         <div class="grid-2">
             <div class="mini">
-                <h4>No Cluster Management</h4>
-                <p>No shard sizing, no JVM tuning, no rolling restarts. Provision a complete Observability project in under 60 seconds.</p>
+                <h4>No cluster operations</h4>
+                <p>Provision a complete Observability project in minutes. No shard sizing, JVM tuning, or rolling restarts on your plate.</p>
             </div>
             <div class="mini">
-                <h4>Native OTLP Ingestion</h4>
-                <p>Services ship logs, metrics, and traces directly via OTLP gRPC or HTTP. No Collector required in the data path.</p>
+                <h4>Governed ingest (Streams)</h4>
+                <p>Shape OTel pipelines before data accrues: fewer junk documents, clearer signals for alerts and ML, lower stored volume.</p>
             </div>
             <div class="mini">
-                <h4>Unified Correlation</h4>
-                <p>Every signal shares <code>trace.id</code>, <code>merchant.id</code>, and <code>transaction.id</code> — one field pivots a merchant complaint to full telemetry.</p>
+                <h4>Native OTLP</h4>
+                <p>Services send logs, metrics, and traces over OTLP. One wire format into a unified store and query model.</p>
+            </div>
+            <div class="mini">
+                <h4>Elastic ML + ES|QL</h4>
+                <p>Baseline anomalies on metrics and logs complement scheduled ES|QL rules &mdash; fewer brittle thresholds, faster MTTD.</p>
             </div>
             <div class="mini">
                 <h4>Built-in AI Assistant</h4>
-                <p>Every project includes an Elastic AI Assistant with live access to your telemetry — no data export, no separate AI tooling.</p>
+                <p>Investigate with an AI layer that stays inside your project boundary &mdash; no ad-hoc export to external chat tools.</p>
             </div>
             <div class="mini">
-                <h4>Cardinality at Scale</h4>
-                <p>Elastic's data tier architecture handles high-dimensional metric label combinations that overwhelm traditional TSDB backends.</p>
-            </div>
-            <div class="mini">
-                <h4>Autonomous Remediation</h4>
-                <p>Elastic Workflows trigger automated playbooks — alert → investigate → remediate — without human intervention at 3 AM.</p>
+                <h4>Autonomous remediation</h4>
+                <p>Serverless Workflows chain alert context, RCA, and controlled remediation hooks with an audit trail.</p>
             </div>
         </div>
     </div>
 
-    <!-- 03 CAL REPLACEMENT -->
-    <div class="section-label">03 &mdash; CAL Log Replacement</div>
+    <!-- 03 OTEL SEMANTICS (no legacy product names) -->
+    <div class="section-label">03 &mdash; OpenTelemetry as the shared language</div>
     <div class="card">
-        <h2>From CAL to OpenTelemetry Semantic Conventions</h2>
-        <p>The goal is not just "logs in a new place." It's a shared schema understood by every service, every tool, and every engineer — no custom parsers, no proprietary adapters.</p>
+        <h2>Semantic conventions every team can rely on</h2>
+        <p>The move forward is a <strong style="color:#e2e8f0">vendor-neutral schema</strong> understood by collectors, backends, and CNCF tooling &mdash; not bespoke field dictionaries per system. OTel semantic conventions give you service, cloud, HTTP, and error semantics consistently across logs, metrics, and traces.</p>
         <table>
-            <thead><tr><th>CAL Field</th><th>OTel Semantic Convention</th><th>Value Gained</th></tr></thead>
+            <thead><tr><th>Typical legacy log field</th><th>OTel semantic convention</th><th>What you gain</th></tr></thead>
             <tbody>
-                <tr><td><code>CAL_TYPE</code></td><td><code>service.name</code></td><td>Standard across all CNCF tooling; automatic service map grouping</td></tr>
-                <tr><td><code>CAL_MODULE</code></td><td><code>service.namespace</code></td><td>Native subsystem grouping in Kibana service maps</td></tr>
-                <tr><td><code>TXN_ID</code></td><td><code>transaction.id</code> / <code>trace.id</code></td><td>Automatic distributed trace correlation across all services</td></tr>
-                <tr><td><code>MERCHANT_ID</code></td><td><code>merchant.id</code> (custom attribute)</td><td>Pivot any signal — log, metric, trace — by merchant in a single field</td></tr>
-                <tr><td><code>STATUS</code></td><td><code>http.response.status_code</code></td><td>Automatic SLO computation and error rate alerting</td></tr>
-                <tr><td><code>DURATION_MS</code></td><td><code>duration</code> (span attribute)</td><td>Native latency percentile histograms with no pre-aggregation</td></tr>
-                <tr><td><em>No equivalent</em></td><td><code>deployment.environment</code>, <code>cloud.region</code></td><td>Infrastructure and deployment context baked into every signal</td></tr>
+                <tr><td>Service or app name (ad hoc)</td><td><code>service.name</code></td><td>Portable service identity; maps to APM and service maps automatically</td></tr>
+                <tr><td>Subsystem / domain prefix</td><td><code>service.namespace</code></td><td>Cleaner grouping for large org charts and blast-radius views</td></tr>
+                <tr><td>Business transaction key</td><td><code>trace.id</code> / span links</td><td>Distributed context across services without manual join keys</td></tr>
+                <tr><td>HTTP status or outcome code</td><td><code>http.response.status_code</code>, <code>severity_text</code></td><td>Portable error and SLO logic in ES|QL and dashboards</td></tr>
+                <tr><td>Wall-clock duration</td><td>Span <code>duration</code> and metric histograms</td><td>Percentiles and anomaly detection without one-off log parsers</td></tr>
+                <tr><td>Often missing in logs-only stacks</td><td><code>cloud.region</code>, <code>deployment.environment</code></td><td>Infrastructure context on every signal for capacity and incident views</td></tr>
             </tbody>
         </table>
     </div>
 
     <!-- 04 ESQL -->
-    <div class="section-label">04 &mdash; ES|QL at Merchant Scale</div>
+    <div class="section-label">04 &mdash; ES|QL at scale</div>
     <div class="card">
-        <h2>One Query Language Across All Signals — No Splunk SPL, No PromQL</h2>
-        <p>ES|QL is a pipe-based query language purpose-built for high-volume telemetry. Every investigation — from a merchant complaint to a production incident — uses the same syntax across logs, metrics, and traces.</p>
-        <div class="code-block"><span class="cmt">-- Which services are failing for a specific merchant?</span>
-<span class="kw">FROM</span> logs.otel
-<span class="kw">| WHERE</span> merchant.id == <span class="str">"M-98231"</span> <span class="kw">AND</span> severity_text == <span class="str">"ERROR"</span>
+        <h2>One query language across logs (and metrics where mapped)</h2>
+        <p>This workshop uses the <strong style="color:#e2e8f0">Retail Banking Platform</strong> scenario in the lab VM. Examples below match the <code>logs.otel</code> paths and service names you will see in Kibana.</p>
+        <div class="code-block"><span class="cmt">-- Errors by service (same pattern as lab workflows)</span>
+<span class="kw">FROM</span> logs.otel, logs.otel.*
+<span class="kw">| WHERE</span> @timestamp > <span class="fn">NOW</span>() - <span class="str">30 MINUTES</span> <span class="kw">AND</span> severity_text == <span class="str">"ERROR"</span>
 <span class="kw">| STATS</span> errors = <span class="fn">COUNT</span>(*) <span class="kw">BY</span> service.name
 <span class="kw">| SORT</span> errors <span class="kw">DESC</span></div>
-        <div class="code-block"><span class="cmt">-- P99 checkout latency by merchant tier and cloud region</span>
-<span class="kw">FROM</span> metrics-*
+        <div class="code-block"><span class="cmt">-- Log volume over time by service (merchant-scale traffic shaping)</span>
+<span class="kw">FROM</span> logs.otel, logs.otel.*
+<span class="kw">| WHERE</span> @timestamp > <span class="fn">NOW</span>() - <span class="str">30 MINUTES</span>
+<span class="kw">| EVAL</span> bucket5m = <span class="fn">DATE_TRUNC</span>(5 minutes, @timestamp)
+<span class="kw">| STATS</span> events = <span class="fn">COUNT</span>(*) <span class="kw">BY</span> bucket5m, service.name
+<span class="kw">| SORT</span> bucket5m <span class="kw">DESC</span></div>
+        <div class="code-block"><span class="cmt">-- Drill into a hot service (example: payment path)</span>
+<span class="kw">FROM</span> logs.otel, logs.otel.*
 <span class="kw">| WHERE</span> @timestamp > <span class="fn">NOW</span>() - <span class="str">15 MINUTES</span>
-  <span class="kw">AND</span> service.name == <span class="str">"checkout-service"</span>
-<span class="kw">| STATS</span> p99 = <span class="fn">PERCENTILE</span>(transaction.duration, 99) <span class="kw">BY</span> merchant.tier, cloud.region
-<span class="kw">| SORT</span> p99 <span class="kw">DESC</span></div>
-        <div class="code-block"><span class="cmt">-- Trace all service hops for a single transaction</span>
-<span class="kw">FROM</span> traces-*
-<span class="kw">| WHERE</span> transaction.id == <span class="str">"TXN-44821903"</span>
-<span class="kw">| STATS</span> spans = <span class="fn">COUNT</span>(*), errors = <span class="fn">COUNT_IF</span>(error == <span class="kw">true</span>)
-    <span class="kw">BY</span> service.name
-<span class="kw">| SORT</span> spans <span class="kw">DESC</span></div>
+  <span class="kw">AND</span> service.name == <span class="str">"payment-engine"</span>
+<span class="kw">| KEEP</span> @timestamp, severity_text, body.text
+<span class="kw">| SORT</span> @timestamp <span class="kw">DESC</span>
+<span class="kw">| LIMIT</span> 25</div>
     </div>
 
-    <!-- 05 SERVICES -->
-    <div class="section-label">05 &mdash; What You'll Explore in This Lab</div>
+    <!-- 05 SERVICES — Retail Banking scenario (matches Instruqt lab) -->
+    <div class="section-label">05 &mdash; What You&apos;ll Explore in This Lab</div>
     <div class="card">
-        <h2>7 PayPal Microservices — Live Telemetry Flowing to Elastic Serverless</h2>
-        <p>All 7 services are provisioning now, emitting logs, metrics, and traces via OTLP to your Elastic Serverless Observability project. When loading completes, click the <strong style="color:#38bdf8">Elastic Serverless</strong> tab or the button below to open Kibana.</p>
-        <div class="services">
-            <div class="svc">
-                <div class="name">merchant-api</div>
-                <div class="desc">Merchant profile, settings, token validation</div>
-                <div class="cloud">AWS &middot; us-east-1</div>
+        <h2>Retail Banking Platform &mdash; 9 services, live OTLP to Elastic Serverless</h2>
+        <p>The <strong style="color:#7dd3fc">Retail Banking Platform</strong> demo (synthetic stand-in for complex payment-adjacent flows) provisions into your project with logs, metrics, and traces on <code>logs.otel</code>, <code>metrics*</code>, and traces. When loading completes, open the <strong style="color:#7dd3fc">Elastic Serverless</strong> tab in Instruqt or use the button below.</p>
+        <p style="margin-top:10px;color:#64748b;font-size:12px;">The nine tiles below are the services emitted by this workshop &mdash; not a generic placeholder list.</p>
+        <div class="services" role="list" aria-label="Retail Banking demo services">
+            <div class="svc" role="listitem">
+                <div class="name">mobile-gateway</div>
+                <div class="desc">Digital banking APIs and mobile session paths</div>
+                <div class="cloud">AWS &middot; us-east-1 &middot; digital_banking</div>
             </div>
-            <div class="svc">
-                <div class="name">checkout-service</div>
-                <div class="desc">Checkout session orchestration</div>
-                <div class="cloud">AWS &middot; us-east-1</div>
+            <div class="svc" role="listitem">
+                <div class="name">payment-engine</div>
+                <div class="desc">Payment routing, settlement-adjacent processing</div>
+                <div class="cloud">AWS &middot; us-east-1 &middot; payment_processing</div>
             </div>
-            <div class="svc">
-                <div class="name">payments-orchestrator</div>
-                <div class="desc">Payment routing and processing</div>
-                <div class="cloud">AWS &middot; us-east-1</div>
+            <div class="svc" role="listitem">
+                <div class="name">fraud-sentinel</div>
+                <div class="desc">Real-time risk and fraud scoring</div>
+                <div class="cloud">GCP &middot; us-central1 &middot; fraud_detection</div>
             </div>
-            <div class="svc">
-                <div class="name">fraud-decisioning</div>
-                <div class="desc">Real-time fraud scoring</div>
-                <div class="cloud">GCP &middot; us-central1</div>
+            <div class="svc" role="listitem">
+                <div class="name">auth-gateway</div>
+                <div class="desc">Authentication and session trust</div>
+                <div class="cloud">GCP &middot; us-central1 &middot; authentication</div>
             </div>
-            <div class="svc">
-                <div class="name">settlement-service</div>
-                <div class="desc">Settlement batch processing</div>
-                <div class="cloud">GCP &middot; us-central1</div>
+            <div class="svc" role="listitem">
+                <div class="name">claims-processor</div>
+                <div class="desc">Claims intake and back-office processing</div>
+                <div class="cloud">AWS &middot; us-east-1 &middot; claims_management</div>
             </div>
-            <div class="svc">
-                <div class="name">merchant-support-api</div>
-                <div class="desc">Support tickets, account management</div>
-                <div class="cloud">Azure &middot; eastus</div>
+            <div class="svc" role="listitem">
+                <div class="name">policy-manager</div>
+                <div class="desc">Policy administration and rules surfaces</div>
+                <div class="cloud">GCP &middot; us-central1 &middot; policy_administration</div>
             </div>
-            <div class="svc">
-                <div class="name">notification-service</div>
-                <div class="desc">Email, push, and webhook delivery</div>
-                <div class="cloud">Azure &middot; eastus</div>
+            <div class="svc" role="listitem">
+                <div class="name">quote-engine</div>
+                <div class="desc">Underwriting and pricing-style decisioning</div>
+                <div class="cloud">Azure &middot; eastus &middot; underwriting</div>
+            </div>
+            <div class="svc" role="listitem">
+                <div class="name">member-portal</div>
+                <div class="desc">Member self-service and support flows</div>
+                <div class="cloud">Azure &middot; eastus &middot; member_services</div>
+            </div>
+            <div class="svc" role="listitem">
+                <div class="name">document-vault</div>
+                <div class="desc">Secure document handling</div>
+                <div class="cloud">Azure &middot; eastus &middot; document_management</div>
             </div>
         </div>
         <div class="caps">
+            <span class="badge badge-gold">Elastic Streams (TCO)</span>
+            <span class="badge badge-gold">Elastic ML / Anomalies</span>
             <span class="badge badge-green">ES|QL Alert Rules</span>
             <span class="badge badge-green">AI Investigation Agent</span>
-            <span class="badge badge-green">Autonomous Workflows</span>
-            <span class="badge badge-green">Merchant Dashboards</span>
-            <span class="badge badge-green">Service Maps</span>
-            <span class="badge badge-green">Anomaly Detection</span>
+            <span class="badge badge-green">Serverless Workflows</span>
+            <span class="badge badge-green">Dashboards &amp; APM</span>
+            <span class="badge badge-green">Cases &amp; audit trail</span>
             <span class="badge badge-blue">OpenTelemetry Native</span>
-            <span class="badge badge-blue">Zero-Ops Serverless</span>
+            <span class="badge badge-blue">Elastic Cloud Serverless</span>
         </div>
     </div>
 
@@ -298,7 +370,7 @@
     </div>
 
     <div class="footer">
-        <p>Your environment will be ready in a few minutes. Click below once loading completes.</p>
+        <p>Your environment will be ready in a few minutes. In Instruqt, use the button below once loading completes (opens Kibana in the lab proxy).</p>
         <a href="javascript:window.location.href='/app/dashboards#/list?_g=(filters:!(),refreshInterval:(pause:!f,value:30000),time:(from:now-30m,to:now))'">
             Open Kibana Dashboards &rarr;
         </a>
