@@ -213,7 +213,7 @@ FROM metrics-apm.otel-*, metrics-apm.internal-*
 | LIMIT 40
 ```
 
-**4 — Time series without guessing column names:** Prefer **logs** for a simple per-minute volume plot (always has **`@timestamp`** in this lab):
+**4 — Time series on logs (no metric columns needed):** Prefer **logs** for a simple per-minute volume plot (always has **`@timestamp`** in this lab):
 
 ```esql
 FROM logs.otel, logs.otel.*
@@ -223,9 +223,44 @@ FROM logs.otel, logs.otel.*
 | SORT minute DESC
 ```
 
-If you later confirm a numeric metric field in Discover, you can add a parallel **`FROM metrics* ... | STATS ... BY minute`** query using that field.
+**5 — `TS metrics*` (Retail Banking demo gauges)** — time-series command over **TSDS-style** metric indices. These examples use **scenario field names** from the Retail Banking workload; if ES|QL returns **`Unknown column`**, open **Discover** on the busiest **`metrics-*`** stream and substitute the exact dotted names (wrap them in **backticks**). Never use Fanatics fields (**`auction.*`**, **`card_printing.*`**, **`cloud_inventory.*`**).
 
-For **`TS metrics*`**, use the same index pattern Discover uses for metrics, but only with field names that **already exist** in your project—never Fanatics **`auction.*`**, **`card_printing.*`**, or **`cloud_inventory.*`**.
+**Payment throughput (`payment-engine`) — `TS metrics*`:**
+
+```esql
+TS metrics*
+| WHERE @timestamp > NOW() - 15 MINUTES
+| EVAL minute = DATE_TRUNC(1 minute, @timestamp)
+| STATS tps = AVG(`payment_engine.transactions_per_sec`) BY minute
+| SORT minute DESC
+```
+
+**Mobile API latency P95 — `TS metrics*`:**
+
+```esql
+TS metrics*
+| WHERE @timestamp > NOW() - 15 MINUTES
+| EVAL minute = DATE_TRUNC(1 minute, @timestamp)
+| STATS p95_ms = PERCENTILE(`mobile_gateway.api_latency_ms`, 95) BY minute
+| SORT minute DESC
+```
+
+**Multi-metric dashboard slice — `TS metrics*`:**
+
+```esql
+TS metrics*
+| WHERE @timestamp > NOW() - 15 MINUTES
+| EVAL minute = DATE_TRUNC(1 minute, @timestamp)
+| STATS
+    api_latency_ms = AVG(`mobile_gateway.api_latency_ms`),
+    active_sessions = AVG(`mobile_gateway.active_sessions`),
+    transactions_per_sec = AVG(`payment_engine.transactions_per_sec`),
+    fraud_risk = AVG(`fraud_sentinel.avg_risk_score`)
+  BY minute
+| SORT minute DESC
+```
+
+If **`TS metrics*`** is slow or noisy, narrow the source to OTel app metrics, for example **`TS metrics-apm.otel-*`** (syntax must match indices in your project). If **`@timestamp`** is rejected on **`TS`**, your build may require a different time predicate—fall back to the **`FROM metrics* …`** patterns above or use **Discover → Metrics** to generate a `TS` query your stack accepts.
 
 ---
 
@@ -245,4 +280,4 @@ The demo **deployer** pushes assets into your project when the scenario runs—s
 
 ## ✅ Ready for the next challenge
 
-Continue when you have **logs or services** in Elastic Serverless and have skimmed **Applications**, **Infrastructure**, or **Streams** (and optionally **Dashboards** or a **metrics / TS** query).
+Continue when you have **logs or services** in Elastic Serverless and have skimmed **Applications**, **Infrastructure**, or **Streams** (and optionally **Dashboards**, a **`TS metrics*`** example, or a **`FROM metrics*`** discovery query).

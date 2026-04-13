@@ -168,7 +168,25 @@ FROM logs.otel, logs.otel.*
 | LIMIT 20
 ```
 
-Then open **Discover** on the busiest `metrics-*` stream, pick a **numeric** field that appears for your services, and use it in **`FROM metrics*`** (or **`TS metrics*`** if your stack generates that pattern) with **backticks** around dotted names. Do not copy **`auction.*` / `card_printing.*` / `cloud_inventory.*`** examples from other demos.
+Then open **Discover** on the busiest `metrics-*` stream, pick a **numeric** field that appears for your services, and use it in **`FROM metrics*`** or **`TS metrics*`** with **backticks** around dotted names. Do not copy **`auction.*` / `card_printing.*` / `cloud_inventory.*`** examples from other demos.
+
+**`TS metrics*` examples (Retail Banking)** — swap field names if Discover shows different dotted paths:
+
+```esql
+TS metrics*
+| WHERE @timestamp > NOW() - 15 MINUTES
+| EVAL minute = DATE_TRUNC(1 minute, @timestamp)
+| STATS tps = AVG(`payment_engine.transactions_per_sec`) BY minute
+| SORT minute DESC
+```
+
+```esql
+TS metrics*
+| WHERE @timestamp > NOW() - 15 MINUTES
+| EVAL minute = DATE_TRUNC(1 minute, @timestamp)
+| STATS p95_ms = PERCENTILE(`mobile_gateway.api_latency_ms`, 95) BY minute
+| SORT minute DESC
+```
 
 ---
 
