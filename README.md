@@ -355,5 +355,6 @@ Use **← →**, **Space**, **Home** / **End**, or click the image halves / dots
 | Kibana not loading | NGINX not started | `systemctl status nginx` on VM |
 | "Unknown column @timestamp" in ES\|QL | Wrong index type (common on **`metrics*`**) or empty data | Use **`FROM logs.otel, logs.otel.*`** for time filters; on metrics, drop `WHERE @timestamp` until you confirm the time field in Discover |
 | "Unknown column [cloud.provider]" in ES\|QL | OTel field not top-level in this mapping | Group by **`service.name`** or another field Discover shows under **cloud.*** |
+| Kibana **Case** closed but Chaos still **ACTIVE** | Case is Kibana state; chaos clears per **remediation queue** doc (**one channel per alert run**) or **RESOLVE** on each card | See challenge 3 **“Cases vs Chaos”**; use **RESOLVE** on each **ACTIVE CHANNELS** card for stragglers |
 | Empty chaos fault dropdown | No active deployment | Open Demo App → **Launch**; or `demo-restart` then redeploy |
 | ML / SLOs missing | Scenario not finished pushing assets | Wait for deployment progress; refresh Kibana |

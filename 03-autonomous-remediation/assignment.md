@@ -114,6 +114,22 @@ Find **Retail Banking Platform Significant Event Notification** (search **Retail
 
 > **Multiple active channels:** Each workflow run is usually driven by **one** alert (one fault context). If you injected several faults at once, you may see several executions over time—or click **RESOLVE** next to any channel that stays active after its alert workflow has finished.
 
+### When cases look “done” but Chaos still shows ACTIVE
+
+**Kibana Cases** and the **Incident Simulator** are not the same state machine:
+
+- **`create_case`** (and later **case closed** if you or a workflow closes it) only updates **Kibana**. That can finish while faults are still **ACTIVE** in the demo.
+- **`queue_remediation`** writes **one** pending document to **`banking-remediation-queue`** with **one** `channel` number—the channel passed in from **that** alert. The VM’s **remediation poller** reads the queue and calls **`resolve`** for that channel only.
+- So **one successful Significant Event run ≈ one auto-cleared channel** (after the poller runs). If you have **several** red cards under **ACTIVE CHANNELS**, you usually need **several** alert-driven runs (staggered as rules fire) **or** you clear the rest yourself.
+
+**What to do in the UI**
+
+1. On each **ACTIVE CHANNELS** card, use the green **RESOLVE** on the **card** (not only the left panel—pick a channel in **SELECT CHANNEL** if you use the panel **RESOLVE**). That talks directly to the demo app and clears that fault even if Elastic already closed a case.
+2. In **Observability → Workflows → Executions**, confirm **`queue_remediation`** succeeded (no failure on that step). If it failed, chaos will not auto-clear for that run.
+3. Wait up to ~**15s** after a successful `queue_remediation` for the poller cycle, then refresh the Chaos view.
+
+This is expected in a **multi-fault** drill: the workshop still demonstrates **case + workflow + queue**, but **human RESOLVE** (or time until **auto-expire**) is normal for channels that never received their own queued remediation.
+
 ---
 
 ## Step 3 — Review the AI agent investigation & remediation
@@ -146,7 +162,7 @@ FROM logs.otel, logs.otel.*
 | STATS error_count = COUNT(*) BY service.name
 | SORT error_count DESC
 ```
-4. **Chaos Controller** — the channel that triggered this alert should move back to **STANDBY** (or drop from **Active Channels**) after remediation; clear any stragglers with **RESOLVE** if you had multiple simultaneous faults
+4. **Chaos Controller** — the **specific channel** tied to the alert that just ran should move to **STANDBY** after **`queue_remediation`** is processed; **other** active cards need their **own** workflow runs or **RESOLVE** on each card (see **Cases vs Chaos** above)
 
 ---
 

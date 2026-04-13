@@ -133,6 +133,8 @@ The alert can drive a workflow that runs an AI investigation: error type from al
 
 In the **Chaos Controller** (or **Demo App → Chaos**), confirm the channel you injected shows as active or in progress. In **Elastic Serverless**, you should already see log errors and (shortly) alerts for that fault.
 
+> **Later, Cases vs Chaos:** In the final challenge, a **closed Kibana case** does not automatically mean every **ACTIVE CHANNEL** card is gone. Each auto-remediation run is tied to **one** alert channel; for **multiple** simultaneous faults, use **RESOLVE** on each card (or wait for **auto-expire**) after workflows and cases have run.
+
 ---
 
 ## Fault channel reference (Retail Banking demo)
