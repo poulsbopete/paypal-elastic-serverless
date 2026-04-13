@@ -24,6 +24,23 @@ notes:
 
     <img src="https://raw.githubusercontent.com/poulsbopete/paypal-elastic-serverless/main/docs/wait-slides/paypal-aiops-problem-solution.png" alt="PayPal AIOps slide: problem (siloed Splunk, BigQuery, ServiceNow; revenue risk; slow MTTD/MTTR) vs solution (Elastic AI, 70% faster detection, business impact)" width="100%" style="max-width: min(1600px, 100vw); width: 100%; height: auto; border-radius: 8px; display: block; margin: 0 auto;" />
 - type: text
+  contents: |
+    ## While you wait — Streams & TCO
+
+    **Elastic Streams** (under **Observability**) is where you **govern** OpenTelemetry
+    ingestion—routing, partitioning, retention, and quality—*before* everything accrues
+    in Elasticsearch. Tighter streams mean **less junk indexed** on **Elastic Cloud
+    Serverless**, which shows up as **lower ingest and retention spend** and fewer
+    noisy alerts for operators.
+
+    Use **[Observability TCO Comparison](https://o11y-compare.vercel.app/)** as a
+    conversation starter with leadership: adjust metrics/logs assumptions, then map
+    “what we stopped indexing or retained shorter” to **TCO** (*tool output is
+    illustrative only—not a vendor quote*).
+
+    In the first challenge you will open **Streams** and relate it to the **`logs.otel`**
+    path used by this Retail Banking scenario.
+- type: text
   contents: "## While You Wait — Play O11y Survivors! \U0001F3AE\n\nSetup takes a
     few minutes. Survive the anomaly storm while Elastic provisions your environment:\n\n<iframe
     src=\"https://poulsbopete.github.io/Vampire-Clone/\" width=\"100%\" height=\"800\"

@@ -218,7 +218,8 @@ For facilitators or advanced troubleshooting, run these on the **es3-api** host 
 The upstream track [elastic-autonomous-observability](https://play.instruqt.com/manage/elastic/tracks/elastic-autonomous-observability) uses:
 
 - **`enhanced_loading: false`** — notes-only while the sandbox provisions.
-- A **separate notes slide** (second `notes` entry) titled **“While You Wait — Play O11y Survivors!”** with an `<iframe>` to [Vampire-Clone](https://poulsbopete.github.io/Vampire-Clone/) at **height 800** (no extra O11Y tab).
+- **Wait slides** in `assignment.md` `notes:`: (1) workshop context, (2) **PayPal AIOps** image slide, (3) **Streams & TCO** copy with link to [Observability TCO Comparison](https://o11y-compare.vercel.app/), (4) **O11y Survivors** `<iframe>` to [Vampire-Clone](https://poulsbopete.github.io/Vampire-Clone/) at **height 800** (no extra O11Y tab).
+- **Challenge 1** includes an **Observability → Streams** step so learners see **governed ingest** tied to **`logs.otel`** before the game tab.
 - **Demo App tabs on port `8090`**: `Demo App` → `/`, **Chaos Controller** → `/chaos`; **Elastic Serverless** on **`8080`** via NGINX with the same **CSP** header overrides as the upstream track.
 
 The VM **`/loading`** page (NGINX) still includes value props + the game for anyone who opens that URL directly.

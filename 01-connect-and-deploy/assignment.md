@@ -16,8 +16,9 @@ notes:
     **Context:** Many PayPal teams evolve from **CAL-style** centralized logging toward **OTel-native** signals and a single analytics plane. This lab uses a **synthetic Retail Banking Platform** scenario (nine services, three clouds) as a **stand-in** for complex payment-adjacent flows: wallets and apps, payments rails, fraud and risk, identity, and back-office processing—not PayPal production data.
 
     **You will:**
-    - Explore **Discover**, **Applications**, **Infrastructure**, and **Dashboards** in Kibana
+    - Explore **Discover**, **Applications**, **Infrastructure**, **Dashboards**, and **Observability → Streams** in Kibana
     - Run **ES|QL** and **TS** queries on OpenTelemetry logs and metrics (`logs.otel`, `metrics*`)
+    - Connect **governed ingest** (Streams) to **Serverless TCO**—less noise indexed, lower variable cost and toil
     - Use the **Demo App** and **Chaos Controller** tabs in later challenges; this one stays in **Elastic Serverless**
 
     **Services in the demo (Retail Banking scenario):**
@@ -40,6 +41,23 @@ notes:
     **PayPal AIOps: Engineering Next-Gen Reliability with Elastic AI** — from fragmented tools and revenue risk to AI-powered detection, tiered storage, and lower TCO.
 
     <img src="https://raw.githubusercontent.com/poulsbopete/paypal-elastic-serverless/main/docs/wait-slides/paypal-aiops-problem-solution.png" alt="PayPal AIOps slide: problem (siloed Splunk, BigQuery, ServiceNow; revenue risk; slow MTTD/MTTR) vs solution (Elastic AI, 70% faster detection, business impact)" width="100%" style="max-width: min(1600px, 100vw); width: 100%; height: auto; border-radius: 8px; display: block; margin: 0 auto;" />
+- type: text
+  contents: |
+    ## While you wait — Streams & TCO
+
+    **Elastic Streams** (under **Observability**) is where you **govern** OpenTelemetry
+    ingestion—routing, partitioning, retention, and quality—*before* everything accrues
+    in Elasticsearch. Tighter streams mean **less junk indexed** on **Elastic Cloud
+    Serverless**, which shows up as **lower ingest and retention spend** and fewer
+    noisy alerts for operators.
+
+    Use **[Observability TCO Comparison](https://o11y-compare.vercel.app/)** as a
+    conversation starter with leadership: adjust metrics/logs assumptions, then map
+    “what we stopped indexing or retained shorter” to **TCO** (*tool output is
+    illustrative only—not a vendor quote*).
+
+    In the first challenge you will open **Streams** and relate it to the **`logs.otel`**
+    path used by this Retail Banking scenario.
 - type: text
   contents: "## While You Wait — Play O11y Survivors! \U0001F3AE\n\nSetup takes a
     few minutes. Survive the anomaly storm while Elastic provisions your environment:\n\n<iframe
@@ -144,6 +162,18 @@ FROM logs.otel, logs.otel.*
 
 **Observability → Infrastructure** — hosts such as **`banking-aws-host-01`**, **`banking-gcp-host-01`**, **`banking-azure-host-01`** and related containers.
 
+### Streams — governed ingest (wired to OTel logs)
+
+Open **Observability → Streams** (or browse to **`/app/streams`** under your proxied Kibana URL). This is the **governed ingest** surface for much of your OTel telemetry: you work with the **log streams** that back **`logs.otel` / `logs-*`**, not a separate copy of the workshop data.
+
+**What to do in this step (2–3 minutes):**
+
+1. Pick the stream that represents **OpenTelemetry logs** for this project (name varies by version; look for **OTel**, **unified**, or **logs** in the title).
+2. Open **Ingest** (or stream detail) and note **routing**, **partitioning**, and **data retention / lifecycle**—these choices flow straight to **Serverless cost** (stored volume + queryable history) and to **signal quality** for alerts and workflows.
+3. If the UI shows **significant events** or **attachments** for that stream, skim them—this is the same “reduce noise before it hits dashboards” story you can stress next to an **[Observability TCO Comparison](https://o11y-compare.vercel.app/)** working session.
+
+If **Streams** is not visible in your build, use the left nav search for **Streams** or continue with **Discover** on **`logs.otel`**—the TCO idea (govern before you store) still applies.
+
 ### Dashboards
 
 **Dashboards** — open scenario dashboards if you like, but **skip or ignore panels** whose ES|QL mentions **`auction.*`**, **`card_printing.*`**, or **`cloud_inventory.*`**. Those metrics belong to the **Fanatics Live** demo, not **Retail Banking**; the columns do not exist in this track and ES|QL will return `Unknown column`.
@@ -205,10 +235,11 @@ The demo **deployer** pushes assets into your project when the scenario runs—s
 | Alert rules | ES\|QL rules aligned to the demo fault channels |
 | Workflows | Alert → investigate → remediate flows |
 | Dashboards | Executive / operations views for the scenario |
+| Streams | **Observability → Streams** — OTel **log** streams tied to `logs.otel` / `logs-*`; ingest, retention, routing |
 | Data views | `logs.otel` / `logs*`, `metrics*`, `traces*` (OTel-friendly views if present) |
 
 ---
 
 ## ✅ Ready for the next challenge
 
-Continue when you have **logs or services** in Elastic Serverless and have skimmed **Applications** or **Infrastructure** (and optionally **Dashboards** or a **metrics / TS** query).
+Continue when you have **logs or services** in Elastic Serverless and have skimmed **Applications**, **Infrastructure**, or **Streams** (and optionally **Dashboards** or a **metrics / TS** query).
