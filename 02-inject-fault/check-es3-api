@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Challenge 3 check: verify at least one chaos channel is currently active.
+# Challenge 2 check: verify at least one chaos channel is currently active.
 
 APP="http://localhost:8090"
 

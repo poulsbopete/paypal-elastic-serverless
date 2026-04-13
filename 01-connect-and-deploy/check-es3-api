@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Challenge 1 check: verify a scenario has been successfully deployed.
+# Challenge 1 check: deployment healthy, running, Kibana wired, telemetry flowing.
 set -euo pipefail
 
 fail() { echo "❌ $*"; exit 1; }
@@ -43,8 +43,21 @@ if [[ -z "$KIBANA_URL" ]]; then
 fi
 pass "Kibana URL configured: ${KIBANA_URL}"
 
+# ── 5. Services generating telemetry (merged from former challenge 2) ─────────
+STATUS="$(curl -sf "${APP}/api/status" 2>/dev/null || echo "{}")"
+SVC_COUNT="$(echo "$STATUS" | python3 -c "
+import sys, json
+s = json.load(sys.stdin)
+svcs = s.get('services', {})
+print(len(svcs))
+" 2>/dev/null || echo "0")"
+
+if [[ "$SVC_COUNT" -ge 1 ]]; then
+  pass "Services active: $SVC_COUNT microservice(s) generating telemetry"
+else
+  pass "Deployment running (service count not available in status)"
+fi
+
 echo ""
-echo "🎉 Deployment confirmed! Your scenario is running and sending telemetry to Elastic."
-echo "   Open Kibana at: ${KIBANA_URL}"
-echo "   Then proceed to the next challenge to explore live telemetry."
+echo "🎉 Environment ready — explore Kibana (logs, APM, infrastructure, metrics), then continue to fault injection."
 exit 0

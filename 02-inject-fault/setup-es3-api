@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Challenge 3 setup: ensure no stale chaos state from a previous attempt.
+# Challenge 2 setup: ensure no stale chaos state from a previous attempt.
 set -euo pipefail
 
-log() { printf "[ch3-setup] %s\n" "$*"; }
+log() { printf "[ch2-setup] %s\n" "$*"; }
 
 DEPS="$(curl -sf http://localhost:8090/api/deployments 2>/dev/null || echo "[]")"
 COUNT="$(echo "$DEPS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")"
 
 if [[ "$COUNT" -lt 1 ]]; then
-  log "WARNING: No active deployments. Learner may need to redo Challenge 1."
+  log "WARNING: No active deployments. Learner may need to redo the first challenge."
   exit 0
 fi
 
@@ -35,4 +35,4 @@ print(sum(1 for v in ch.values() if isinstance(v,dict) and v.get('active')))
   fi
 fi
 
-log "Challenge 3 setup complete."
+log "Challenge 2 setup complete."

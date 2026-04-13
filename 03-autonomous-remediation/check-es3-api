@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Challenge 4 check: verify all fault channels are resolved (chaos is cleared).
+# Challenge 3 check: verify all fault channels are resolved (chaos is cleared).
 set -euo pipefail
 
 fail() { echo "❌ $*"; exit 1; }
@@ -19,7 +19,7 @@ deps = json.load(sys.stdin)
 print(deps[0]['deployment_id'] if deps else '')
 " 2>/dev/null || echo "")"
 
-[[ -n "$DEP_ID" ]] || fail "No active deployment found. Did you complete Challenge 1?"
+[[ -n "$DEP_ID" ]] || fail "No active deployment found. Did you complete the first challenge?"
 pass "Deployment found: $DEP_ID"
 
 # ── All chaos channels are resolved ──────────────────────────────────────────

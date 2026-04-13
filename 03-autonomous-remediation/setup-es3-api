@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Challenge 4 setup: nothing extra needed — just verify state is intact.
+# Challenge 3 setup: nothing extra needed — just verify state is intact.
 set -euo pipefail
 
 DEPS="$(curl -sf http://localhost:8090/api/deployments 2>/dev/null || echo "[]")"
 COUNT="$(echo "$DEPS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")"
-echo "[ch4-setup] Active deployments: $COUNT. Ready for remediation challenge."
+echo "[ch3-setup] Active deployments: $COUNT. Ready for remediation challenge."

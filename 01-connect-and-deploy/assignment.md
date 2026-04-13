@@ -2,36 +2,37 @@
 slug: connect-and-deploy
 id: 5tylvnmrdhym
 type: challenge
-title: Connect & Explore — PayPal Payments Platform
-teaser: Deploy Elastic Serverless and observe live telemetry from 9 financial services
-  across AWS, GCP, and Azure.
+title: PayPal Workshop — Connect & Explore Telemetry
+teaser: Open Elastic Serverless, confirm OTLP is flowing, and practice ES|QL, APM,
+  infrastructure, dashboards, and metrics—the former connect + explore challenges
+  in one stop.
 notes:
 - type: text
   contents: |
-    ## PayPal Payments Platform — Elastic Serverless Observability
+    ## PayPal merchant observability workshop
 
-    PayPal's legacy CAL (Centralized Application Logging) system is proprietary, siloed, and cannot correlate logs, traces, and metrics. Engineers must hop between 3–5 systems to root-cause a single incident.
+    **Goal:** See how **Elastic Cloud Serverless** plus **OpenTelemetry** can consolidate logs, metrics, and traces—and how **ES|QL** and **workflows** support faster detection and response than fragmented logging stacks.
 
-    **In this workshop, you will:**
-    - Observe 9 live financial platform services emitting OpenTelemetry telemetry
-    - Write ES|QL queries to explore trading operations data
-    - Investigate latency, error rates, and order flow in real-time
-    - Trigger and detect financial incidents with the Chaos Controller
-    - Leverage Elastic AI for autonomous remediation
+    **Context:** Many PayPal teams evolve from **CAL-style** centralized logging toward **OTel-native** signals and a single analytics plane. This lab uses a **synthetic Retail Banking Platform** scenario (nine services, three clouds) as a **stand-in** for complex payment-adjacent flows: wallets and apps, payments rails, fraud and risk, identity, and back-office processing—not PayPal production data.
 
-    **The 9 Services (matching the financial scenario):**
+    **You will:**
+    - Explore **Discover**, **Applications**, **Infrastructure**, and **Dashboards** in Kibana
+    - Run **ES|QL** and **TS** queries on OpenTelemetry logs and metrics (`logs.otel`, `metrics*`)
+    - Use the **Demo App** and **Chaos Controller** tabs in later challenges; this one stays in **Elastic Serverless**
 
-    | Service | Cloud | Subsystem |
-    |---------|-------|-----------|
-    | order-gateway | AWS us-east-1 | Order Management |
-    | matching-engine | AWS us-east-1 | Trade Execution |
-    | risk-calculator | AWS us-east-1 | Risk Management |
-    | market-data-feed | GCP us-central1 | Market Data |
-    | settlement-processor | GCP us-central1 | Settlement |
-    | fraud-detector | GCP us-central1 | Compliance |
-    | compliance-monitor | Azure eastus | Compliance |
-    | customer-portal | Azure eastus | Client Services |
-    | audit-logger | Azure eastus | Audit |
+    **Services in the demo (Retail Banking scenario):**
+
+    | Service | Cloud | Subsystem | PayPal-relevant theme |
+    |---------|-------|-----------|------------------------|
+    | mobile-gateway | AWS us-east-1 | digital_banking | Consumer apps & APIs |
+    | payment-engine | AWS us-east-1 | payment_processing | Money movement & settlement |
+    | fraud-sentinel | GCP us-central1 | fraud_detection | Risk & abuse detection |
+    | auth-gateway | GCP us-central1 | authentication | Identity & session trust |
+    | claims-processor | AWS us-east-1 | claims_management | Case-like back-office work |
+    | policy-manager | GCP us-central1 | policy_administration | Rules & policy systems |
+    | quote-engine | Azure eastus | underwriting | Decisioning / pricing logic |
+    | member-portal | Azure eastus | member_services | Self-service surfaces |
+    | document-vault | Azure eastus | document_management | Secure document handling |
 - type: text
   contents: |
     ## While you wait — PayPal AIOps value story
@@ -73,69 +74,141 @@ tabs:
     value: 'script-src ''self'' https://kibana.estccdn.com; worker-src blob: ''self'';
       style-src ''unsafe-inline'' ''self'' https://kibana.estccdn.com; style-src-elem
       ''unsafe-inline'' ''self'' https://kibana.estccdn.com'
-- id: szv5okbgr6iu
-  title: Terminal
-  type: terminal
-  hostname: es3-api
 difficulty: basic
 timelimit: 1200
 enhanced_loading: null
 ---
 
-# Connect to Elastic Cloud & Deploy
+# Connect to Elastic Cloud & deploy
 
-> **Workshop note:** This track auto-launches the **Retail Banking Platform** scenario (`banking`) at start and **does not list** the Claro NOC scenario in the picker. Sidebar notes may still describe a PayPal narrative; use **live banking service names** from the demo (for example `mobile-gateway`, `claims-processor`) in Kibana and ES|QL until challenge copy is fully updated.
+This **PayPal Elastic Serverless** workshop uses a shared **Elastic Cloud Serverless Observability** project, provisioned when the lab starts. Open the **Elastic Serverless** tab—you are proxied in (no manual login).
 
-Your Elastic Cloud Serverless Observability project was **automatically provisioned** when this lab started — open the **Elastic Serverless** tab directly. No login required.
+The VM runs **elastic-launch-demo** with your project’s Kibana URL and API key. The track **auto-launches** the **Retail Banking Platform** (`banking`) scenario as the demo workload and **hides** unrelated scenarios (e.g. Claro NOC) from the picker.
 
-The demo platform is already running on this VM and has been pre-configured with your project's credentials.
+Your workspace has three tabs: **Demo App** (scenario lifecycle), **Chaos Controller** (fault injection in a later challenge), and **Elastic Serverless** (Kibana). This challenge stays in **Elastic Serverless**; avoid **Stop & Teardown** in the Demo App unless you intend to redeploy.
 
 ---
 
-## Step 1 — Verify the Deployment is Running
+## Explore Elastic Serverless
 
-Open the **Demo App** tab. You should see the **Retail Banking Platform** scenario already deployed and sending telemetry. If the deployment bar is still in progress, wait a moment for it to complete.
+In the **Elastic Serverless** tab, set the time range to **Last 15 minutes** or **Last 30 minutes**.
 
-You can also confirm in the **Terminal** tab:
+### Logs — Discover and ES|QL
 
-```bash
-demo-deployments
+**Discover →** an OpenTelemetry logs data view (**`logs.otel`**, **All logs**, or `logs*`). **Discover → Try ES|QL** using **`FROM logs.otel, logs.otel.*`** (fallback: **`FROM logs*`**).
+
+**Errors by service:**
+
+```esql
+FROM logs.otel, logs.otel.*
+| WHERE @timestamp > NOW() - 30 MINUTES AND severity_text == "ERROR"
+| STATS errors = COUNT(*) BY service.name
+| SORT errors DESC
 ```
 
+**Counts by service and severity:**
+
+```esql
+FROM logs.otel, logs.otel.*
+| WHERE @timestamp > NOW() - 30 MINUTES
+| STATS cnt = COUNT(*) BY service.name, severity_text
+| SORT cnt DESC
+```
+
+**Log volume by cloud:**
+
+```esql
+FROM logs.otel, logs.otel.*
+| WHERE @timestamp > NOW() - 30 MINUTES
+| EVAL bucket5m = DATE_TRUNC(5 minutes, @timestamp)
+| STATS events = COUNT(*) BY bucket5m, cloud.provider
+| SORT bucket5m DESC
+```
+
+**Mobile/API-style traffic (`mobile-gateway`):**
+
+```esql
+FROM logs.otel, logs.otel.*
+| WHERE @timestamp > NOW() - 15 MINUTES
+| WHERE service.name == "mobile-gateway" AND body.text LIKE "*api_request*"
+| KEEP @timestamp, body.text
+| SORT @timestamp DESC
+| LIMIT 25
+```
+
+### Applications (APM)
+
+**Observability → Applications** (or **APM**). Expect services such as `mobile-gateway`, `claims-processor`, `payment-engine`, `policy-manager`, `fraud-sentinel`, `auth-gateway`, `quote-engine`, `member-portal`, `document-vault`. Open one → **Transactions** or **Errors**.
+
+### Infrastructure
+
+**Observability → Infrastructure** — hosts such as **`banking-aws-host-01`**, **`banking-gcp-host-01`**, **`banking-azure-host-01`** and related containers.
+
+### Dashboards
+
+**Dashboards** — open scenario dashboards if you like, but **skip or ignore panels** whose ES|QL mentions **`auction.*`**, **`card_printing.*`**, or **`cloud_inventory.*`**. Those metrics belong to the **Fanatics Live** demo, not **Retail Banking**; the columns do not exist in this track and ES|QL will return `Unknown column`.
+
+### Metrics — discover first, then TS
+
+**Discover → Try ES|QL** (or Discover **Metrics** mode, if available). This workshop runs **`banking` (Retail Banking)** only. Any **`TS metrics*`** or chart copied from **Fanatics** material will fail on fields such as `auction.active_auctions`, `card_printing.queue_depth`, or `cloud_inventory.aws.compliance_pct`—**do not use those names here.**
+
+**1 — See which metrics streams actually have data:**
+
+```esql
+FROM metrics* METADATA _index
+| WHERE @timestamp > NOW() - 30 MINUTES
+| STATS docs = COUNT(*) BY _index
+| SORT docs DESC
+| LIMIT 15
+```
+
+**2 — Count samples per service** (uses `service.name`, which is common on OTel metric documents):
+
+```esql
+FROM metrics*
+| WHERE @timestamp > NOW() - 30 MINUTES AND service.name IS NOT NULL
+| STATS samples = COUNT(*) BY service.name
+| SORT samples DESC
+| LIMIT 20
+```
+
+**3 — List `metric.name` values** (works when data is in APM OTel metric indices; if ES|QL reports an unknown column here, skip this query and use the field list in Discover on your busiest stream from step 1):
+
+```esql
+FROM metrics-apm.otel-*, metrics-apm.internal-*
+| WHERE @timestamp > NOW() - 30 MINUTES
+| STATS samples = COUNT(*) BY metric.name
+| SORT samples DESC
+| LIMIT 40
+```
+
+**4 — Time series without guessing column names:** Once you see a numeric gauge or counter field in Discover for your stream, aggregate it with **`FROM metrics*`** (wrap dotted names in **backticks**). Until then, you can still plot **event volume** per minute for a service:
+
+```esql
+FROM metrics*
+| WHERE @timestamp > NOW() - 15 MINUTES AND service.name == "mobile-gateway"
+| EVAL minute = DATE_TRUNC(1 minute, @timestamp)
+| STATS samples = COUNT(*) BY minute
+| SORT minute DESC
+```
+
+For **`TS metrics*`**, use the same index pattern Discover uses for metrics, but only with field names that **already exist** in your project—never Fanatics **`auction.*`**, **`card_printing.*`**, or **`cloud_inventory.*`**.
+
 ---
 
-## Step 2 — Explore the Demo App
+## What the scenario deploys into Kibana
 
-The Demo App is your control panel for this lab. From here you can:
+The demo **deployer** pushes assets into your project when the scenario runs—similar to how you would onboard **alert rules**, **dashboards**, and **workflows** for a PayPal org space in Serverless:
 
-- **View the live dashboard** — real-time service health across all 9 microservices
-- **Open the Chaos Controller** — inject and resolve fault channels
-- **Monitor deployment status** — see all active Elastic resources
-
----
-
-## Step 3 — Open Elastic Serverless
-
-Click the **Elastic Serverless** tab. This opens your auto-provisioned Observability project, pre-logged in. Navigate to:
-
-- **Discover → ES|QL** — query live logs from services like `auction-engine`, `card-printing-system`, `digital-marketplace`
-- **Applications → Service inventory** — distributed traces from 7 services (4 network services are logs-only)
-- **Observability → Infrastructure** — 3 simulated hosts (AWS, GCP, Azure)
-
-> **Tip:** Set the time range to **Last 15 minutes** to see recent telemetry.
+| Asset type | What to look for |
+|------------|------------------|
+| Alert rules | ES\|QL rules aligned to the demo fault channels |
+| Workflows | Alert → investigate → remediate flows |
+| Dashboards | Executive / operations views for the scenario |
+| Data views | `logs.otel` / `logs*`, `metrics*`, `traces*` (OTel-friendly views if present) |
 
 ---
 
-## What was auto-deployed
+## ✅ Ready for the next challenge
 
-The track setup automatically provisioned the full observability stack in your Elastic project:
-
-| Resource | Details |
-|----------|---------|
-| Alert rules | 20 ES\|QL rules — one per fault channel |
-| AI agent | Investigation tools + system prompt |
-| Workflows | Alert → investigate → remediate → notify |
-| Dashboards | Executive dashboard + OTel dashboards |
-| Data views | `logs.otel`, `logs.otel.*`, `metrics-*` |
-
-✅ **You're ready for the next challenge when** you can see logs or services in the Elastic Serverless tab.
+Continue when you have **logs or services** in Elastic Serverless and have skimmed **Applications** or **Infrastructure** (and optionally **Dashboards** or a **metrics / TS** query).

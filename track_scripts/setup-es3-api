@@ -751,6 +751,21 @@ else:
         print("Claro already absent — OK")
 SCENARIO_PATCH_EOF
 
+# PayPal track: queue remediation before AI RCA so the demo remediation poller
+# (reads {namespace}-remediation-queue in Elasticsearch) can auto-resolve chaos quickly.
+echo "Patching Significant Event Notification workflow (fast auto-resolve)..."
+TRACK_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+WF_PATCH="${TRACK_SCRIPTS_DIR}/patches/significant_event_notification.yaml"
+WF_TARGET="${DEMO_DIR}/elastic_config/workflows/significant_event_notification.yaml"
+if [[ -f "$WF_PATCH" && -f "$WF_TARGET" ]]; then
+  cp "$WF_PATCH" "$WF_TARGET"
+  echo "Applied workflow patch: queue_remediation before run_rca → ${WF_TARGET}"
+elif [[ ! -f "$WF_TARGET" ]]; then
+  echo "WARN: Workflow template missing at ${WF_TARGET} — skip workflow patch"
+else
+  echo "WARN: Patch file missing at ${WF_PATCH} — skip workflow patch"
+fi
+
 echo "Installing Python dependencies..."
 # Install into a dedicated target dir — avoids PEP 668 / EXTERNALLY-MANAGED entirely
 PKGS_DIR="$DEMO_DIR/packages"

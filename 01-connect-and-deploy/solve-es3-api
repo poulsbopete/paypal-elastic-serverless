@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Challenge 1 solve: programmatically launch the retail banking scenario.
+# Challenge 1 solve (connect + explore): programmatically launch the retail banking scenario.
 # Requires Instruqt track variables:
 #   ELASTIC_KIBANA_URL  — e.g. https://my-project.kb.us-east-1.aws.elastic.cloud
 #   ELASTIC_API_KEY     — just the key value (without "ApiKey " prefix)

@@ -9,16 +9,15 @@ An Instruqt workshop demonstrating how Elastic Serverless + OpenTelemetry replac
 
 ## Overview
 
-This lab puts participants in the role of a PayPal SRE evaluating Elastic Serverless as a CAL replacement. Across four challenges, they experience the full observability modernization story: from connecting a live multi-cloud environment to autonomous AI-driven incident remediation powered by ML anomaly detection.
+This lab puts participants in the role of a PayPal SRE evaluating Elastic Serverless as a CAL replacement. Across **three** challenges, they experience the full observability modernization story: from connecting and exploring live telemetry in Serverless to fault injection and autonomous AI-driven incident remediation powered by ML anomaly detection.
 
 ### Story Arc
 
 | Phase | Title | What Happens |
 |---|---|---|
-| **Challenge 1** | Connect & Deploy | Elastic Serverless project is provisioned; 7 PayPal microservices start emitting OTLP telemetry; learners verify live data in Kibana |
-| **Challenge 2** | Explore Telemetry | ES\|QL queries replace CAL log lookups; logs, metrics, and distributed traces are explored across all services |
-| **Challenge 3** | Inject a Fault | A payment incident is triggered via the Chaos Controller; learners watch Elastic surface merchant impact in real time |
-| **Challenge 4** | Autonomous Remediation | Elastic AI Agent + Workflows investigate and remediate automatically; ML anomaly jobs flag the incident; SLOs show service health |
+| **Challenge 1** | Connect & explore telemetry | Serverless project + Retail Banking demo; learners use Discover, ES\|QL, APM, infrastructure, dashboards, and TS metrics in one challenge |
+| **Challenge 2** | Inject a Fault | A payment incident is triggered via the Chaos Controller; learners watch Elastic surface merchant impact in real time |
+| **Challenge 3** | Autonomous Remediation | Elastic AI Agent + Workflows investigate and remediate automatically; ML anomaly jobs flag the incident; SLOs show service health |
 
 ---
 
@@ -79,26 +78,23 @@ paypal-elastic-serverless/
 │   ├── setup-es3-api                  # Main provisioning script (same baseline as elastic-autonomous-observability, ~850 lines)
 │   └── cleanup-es3-api                # Teardown (deletes Elastic Cloud project)
 ├── 01-connect-and-deploy/
-│   ├── assignment.md                  # Challenge content + tabs
-│   ├── setup-es3-api                  # Per-challenge health check
-│   ├── check-es3-api                  # Completion check
-│   └── solve-es3-api                  # Auto-solve
-├── 02-explore-telemetry/
-│   ├── assignment.md
+│   ├── assignment.md                  # Connect + explore telemetry (merged former ch1+ch2)
 │   ├── setup-es3-api
-│   ├── check-es3-api
+│   ├── check-es3-api                  # Deployment + Kibana + telemetry service count
 │   └── solve-es3-api
-├── 03-inject-fault/
+├── 02-inject-fault/
 │   ├── assignment.md
 │   ├── setup-es3-api
 │   ├── check-es3-api                  # Accepts both ACTIVE and RESOLVED fault states
 │   └── solve-es3-api
-└── 04-autonomous-remediation/
+└── 03-autonomous-remediation/
     ├── assignment.md
     ├── setup-es3-api
     ├── check-es3-api
     └── solve-es3-api
 ```
+
+**Learner UI:** Challenge `tabs:` intentionally list only **Demo App**, **Chaos Controller**, and **Elastic Serverless**—no **Terminal** tab. Do not add `type: terminal` to `assignment.md`; facilitators use Instruqt **Shell** / SSH for VM diagnostics (see **Diagnostic Commands**).
 
 ---
 
@@ -111,7 +107,7 @@ paypal-elastic-serverless/
 3. **Installs NGINX** on port **8080** as a Kibana reverse proxy (Basic auth to the project)
 4. **Serves** `/loading` and `/chatbot` static pages
 5. **Starts** the JSON credentials server on port **8081**
-6. **Clones** `elastic-launch-demo` (branch `feat/back-navigation-noc-chaos`), **patches** `scenarios/__init__.py` to remove **Claro** from the scenario list, installs deps, and starts **systemd** `elastic-demo` on port **8090** with **`ACTIVE_SCENARIO=banking`**
+6. **Clones** `elastic-launch-demo` (branch `feat/back-navigation-noc-chaos`), **patches** `scenarios/__init__.py` to remove **Claro** from the scenario list, **replaces** `elastic_config/workflows/significant_event_notification.yaml` with a PayPal copy that runs **`queue_remediation` before `run_rca`** so chaos faults **auto-resolve** via the demo’s Elasticsearch remediation-queue poller without waiting for the AI step, then installs deps and starts **systemd** `elastic-demo` on port **8090** with **`ACTIVE_SCENARIO=banking`**
 7. **POSTs `/api/setup/launch`** with `scenario_id: banking` so the **Retail Banking Platform** deploys into the project (alerts, workflows, dashboards, ML, etc. come from that deployment — not from extra bash in this repo)
 
 Shell aliases: `demo-logs`, `demo-status`, `demo-deployments`, `demo-chaos`, `demo-restart` (see **Diagnostic Commands**).
@@ -120,14 +116,22 @@ Shell aliases: `demo-logs`, `demo-status`, `demo-deployments`, `demo-chaos`, `de
 
 ## ES|QL Quick Reference
 
-After the scenario is running, use Discover’s data views (for example **All logs** / `logs-*`) or ES|QL against `logs*`, `metrics*`, `traces-*`:
+After the scenario is running, use Discover’s data views (for example **`logs.otel`**, **All logs**, or `logs-*`) or ES|QL against OTel log streams, `metrics*`, `traces-*`.
+
+Banking alert rules and workflows use OpenTelemetry logs — in ES|QL prefer:
 
 ```esql
-FROM logs*
+FROM logs.otel, logs.otel.*
+```
+
+If that returns no rows, use **`FROM logs*`** instead.
+
+```esql
+FROM logs.otel, logs.otel.*
 | STATS total = COUNT(*), services = COUNT_DISTINCT(service.name)
 | LIMIT 10
 
-FROM logs*
+FROM logs.otel, logs.otel.*
 | WHERE @timestamp > NOW() - 30 minutes AND severity_text == "ERROR"
 | STATS errors = COUNT(*) BY service.name
 | SORT errors DESC
@@ -137,11 +141,35 @@ FROM logs*
 
 | Concept | Typical field | Example |
 |---|---|---|
-| Service | `service.name` | `auction-engine` |
+| Service | `service.name` | `mobile-gateway`, `payment-engine`, … |
 | Log body | `message` or `body.text` | (depends on integration) |
 | Severity | `log.level` / `severity_text` | `ERROR` |
 | Trace | `trace.id` | hex string |
 | Time | `@timestamp` | ISO-8601 |
+
+### Retail Banking metrics (discover fields; avoid Fanatics)
+
+This track deploys **`banking` (Retail Banking)** only. Saved queries or dashboards that reference **Fanatics Live** metrics (`auction.*`, `card_printing.*`, `cloud_inventory.*`) will fail with **`Unknown column`**—those fields are not in this scenario.
+
+**Discover what exists, then aggregate:**
+
+```esql
+FROM metrics* METADATA _index
+| WHERE @timestamp > NOW() - 30 MINUTES
+| STATS docs = COUNT(*) BY _index
+| SORT docs DESC
+| LIMIT 15
+```
+
+```esql
+FROM metrics*
+| WHERE @timestamp > NOW() - 30 MINUTES AND service.name IS NOT NULL
+| STATS samples = COUNT(*) BY service.name
+| SORT samples DESC
+| LIMIT 20
+```
+
+Then open **Discover** on the busiest `metrics-*` stream, pick a **numeric** field that appears for your services, and use it in **`FROM metrics*`** (or **`TS metrics*`** if your stack generates that pattern) with **backticks** around dotted names. Do not copy **`auction.*` / `card_printing.*` / `cloud_inventory.*`** examples from other demos.
 
 ---
 
@@ -160,7 +188,7 @@ FROM logs*
 
 ## Diagnostic Commands
 
-Run these in the **Terminal** tab on the Instruqt VM:
+For facilitators or advanced troubleshooting, run these on the **es3-api** host (Instruqt **Shell** or SSH). Learners complete the lab using the **Demo App**, **Chaos Controller**, and **Elastic Serverless** tabs only.
 
 | Command | What it does |
 |---|---|
@@ -251,7 +279,7 @@ instruqt track push --force
 
 ```bash
 # Edit assignment content
-vim 02-explore-telemetry/assignment.md
+vim 01-connect-and-deploy/assignment.md
 
 # Edit provisioning logic
 vim track_scripts/setup-es3-api
