@@ -151,18 +151,17 @@ FROM logs.otel, logs.otel.*
 
 This track deploys **`banking` (Retail Banking)** only. Saved queries or dashboards that reference **Fanatics Live** metrics (`auction.*`, `card_printing.*`, `cloud_inventory.*`) will fail with **`Unknown column`**—those fields are not in this scenario.
 
-**Discover what exists, then aggregate:**
+**Discover what exists, then aggregate:** On some **`metrics*`** streams ES|QL may not expose **`@timestamp`** (you will see `Unknown column [@timestamp]`). Use **logs** for time-windowed counts, or omit the time filter on metrics for a coarse index roll-up.
 
 ```esql
 FROM metrics* METADATA _index
-| WHERE @timestamp > NOW() - 30 MINUTES
 | STATS docs = COUNT(*) BY _index
 | SORT docs DESC
 | LIMIT 15
 ```
 
 ```esql
-FROM metrics*
+FROM logs.otel, logs.otel.*
 | WHERE @timestamp > NOW() - 30 MINUTES AND service.name IS NOT NULL
 | STATS samples = COUNT(*) BY service.name
 | SORT samples DESC
@@ -336,6 +335,7 @@ Use **← →**, **Space**, **Home** / **End**, or click the image halves / dots
 | Secrets not available in setup script | `ESS_CLOUD_API_KEY` not in Elastic org secret store | Add secret in Instruqt org settings |
 | Demo app never healthy | Python deps failed / import error | `journalctl -u elastic-demo -n 50` on VM |
 | Kibana not loading | NGINX not started | `systemctl status nginx` on VM |
-| "Unknown column @timestamp" in ES\|QL | Wrong data view / no data yet | Pick **All logs** or `logs*`; widen time range; wait for scenario deploy |
+| "Unknown column @timestamp" in ES\|QL | Wrong index type (common on **`metrics*`**) or empty data | Use **`FROM logs.otel, logs.otel.*`** for time filters; on metrics, drop `WHERE @timestamp` until you confirm the time field in Discover |
+| "Unknown column [cloud.provider]" in ES\|QL | OTel field not top-level in this mapping | Group by **`service.name`** or another field Discover shows under **cloud.*** |
 | Empty chaos fault dropdown | No active deployment | Open Demo App → **Launch**; or `demo-restart` then redeploy |
 | ML / SLOs missing | Scenario not finished pushing assets | Wait for deployment progress; refresh Kibana |

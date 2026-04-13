@@ -133,13 +133,13 @@ FROM logs.otel, logs.otel.*
 | SORT cnt DESC
 ```
 
-**Log volume by cloud:**
+**Log volume over time (by service)** — `cloud.provider` is **not** always a top-level column in this OTel mapping; grouping by **`service.name`** avoids `Unknown column [cloud.provider]`. If Discover shows a `cloud.*` field for you, substitute it in the `BY` clause.
 
 ```esql
 FROM logs.otel, logs.otel.*
 | WHERE @timestamp > NOW() - 30 MINUTES
 | EVAL bucket5m = DATE_TRUNC(5 minutes, @timestamp)
-| STATS events = COUNT(*) BY bucket5m, cloud.provider
+| STATS events = COUNT(*) BY bucket5m, service.name
 | SORT bucket5m DESC
 ```
 
@@ -182,45 +182,48 @@ If **Streams** is not visible in your build, use the left nav search for **Strea
 
 **Discover → Try ES|QL** (or Discover **Metrics** mode, if available). This workshop runs **`banking` (Retail Banking)** only. Any **`TS metrics*`** or chart copied from **Fanatics** material will fail on fields such as `auction.active_auctions`, `card_printing.queue_depth`, or `cloud_inventory.aws.compliance_pct`—**do not use those names here.**
 
-**1 — See which metrics streams actually have data:**
+> **If ES|QL reports `Unknown column [@timestamp]` on `metrics*`:**
+> some metric data streams do not expose **`@timestamp`** to ES|QL the same way as logs. Prefer **`FROM logs.otel, logs.otel.*`** for time-bucketed counts, or drop the time filter on metrics until you confirm the time field name in **Discover → field list**.
+
+**1 — See which metrics streams have rows** (no `@timestamp` filter — avoids verification errors on mixed `metrics*` mappings):
 
 ```esql
 FROM metrics* METADATA _index
-| WHERE @timestamp > NOW() - 30 MINUTES
 | STATS docs = COUNT(*) BY _index
 | SORT docs DESC
 | LIMIT 15
 ```
 
-**2 — Count samples per service** (uses `service.name`, which is common on OTel metric documents):
+**2 — Count log lines per service (uses `@timestamp` on logs)** — reliable when metrics time fields differ:
 
 ```esql
-FROM metrics*
+FROM logs.otel, logs.otel.*
 | WHERE @timestamp > NOW() - 30 MINUTES AND service.name IS NOT NULL
 | STATS samples = COUNT(*) BY service.name
 | SORT samples DESC
 | LIMIT 20
 ```
 
-**3 — List `metric.name` values** (works when data is in APM OTel metric indices; if ES|QL reports an unknown column here, skip this query and use the field list in Discover on your busiest stream from step 1):
+**3 — List `metric.name` values** (optional; skip if `metric.name` is unknown — use Discover on your busiest metrics stream from step 1):
 
 ```esql
 FROM metrics-apm.otel-*, metrics-apm.internal-*
-| WHERE @timestamp > NOW() - 30 MINUTES
 | STATS samples = COUNT(*) BY metric.name
 | SORT samples DESC
 | LIMIT 40
 ```
 
-**4 — Time series without guessing column names:** Once you see a numeric gauge or counter field in Discover for your stream, aggregate it with **`FROM metrics*`** (wrap dotted names in **backticks**). Until then, you can still plot **event volume** per minute for a service:
+**4 — Time series without guessing column names:** Prefer **logs** for a simple per-minute volume plot (always has **`@timestamp`** in this lab):
 
 ```esql
-FROM metrics*
+FROM logs.otel, logs.otel.*
 | WHERE @timestamp > NOW() - 15 MINUTES AND service.name == "mobile-gateway"
 | EVAL minute = DATE_TRUNC(1 minute, @timestamp)
-| STATS samples = COUNT(*) BY minute
+| STATS log_lines = COUNT(*) BY minute
 | SORT minute DESC
 ```
+
+If you later confirm a numeric metric field in Discover, you can add a parallel **`FROM metrics* ... | STATS ... BY minute`** query using that field.
 
 For **`TS metrics*`**, use the same index pattern Discover uses for metrics, but only with field names that **already exist** in your project—never Fanatics **`auction.*`**, **`card_printing.*`**, or **`cloud_inventory.*`**.
 
